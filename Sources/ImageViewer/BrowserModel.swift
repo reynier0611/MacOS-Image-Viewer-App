@@ -1,0 +1,742 @@
+import AppKit
+import Observation
+import SwiftUI
+import UniformTypeIdentifiers
+
+enum ZoomAction: Equatable {
+    case fit, actualSize, zoomIn, zoomOut
+}
+
+struct ZoomRequest: Equatable {
+    let action: ZoomAction
+    let id = UUID()
+}
+
+struct Toast: Identifiable, Equatable {
+    let id = UUID()
+    let message: String
+    let canUndo: Bool
+}
+
+@MainActor
+@Observable
+final class BrowserModel {
+    static let shared = BrowserModel()
+
+    // MARK: Folder contents
+
+    private(set) var folder: URL?
+    private(set) var folders: [FileItem] = []
+    private(set) var images: [FileItem] = []
+    private(set) var folderError: String?
+    private(set) var isLoadingFolder = false
+    var selection: URL?
+
+    private(set) var backStack: [URL] = []
+    private(set) var forwardStack: [URL] = []
+    private(set) var recentFolders: [URL] = []
+
+    // MARK: Viewer
+
+    private(set) var viewerIndex: Int?
+    private(set) var currentImage: NSImage?
+    private(set) var displayedURL: URL?
+    private(set) var isLoadingImage = false
+    private(set) var imageError: String?
+    private(set) var zoomRequest: ZoomRequest?
+    var zoomPercent: Int?
+
+    // MARK: UI state
+
+    var gridColumns = 1
+    var columnVisibility: NavigationSplitViewVisibility = .all
+    var toast: Toast?
+    var errorMessage: String?
+    var isRenamePresented = false
+    var renameText = ""
+    var isGoToFolderPresented = false
+    var goToFolderText = ""
+
+    // MARK: Preferences
+
+    var sortKey: SortKey {
+        didSet { defaults.set(sortKey.rawValue, forKey: Keys.sortKey); applySort() }
+    }
+    var sortAscending: Bool {
+        didSet { defaults.set(sortAscending, forKey: Keys.sortAscending); applySort() }
+    }
+    var thumbnailSize: Double {
+        didSet { defaults.set(thumbnailSize, forKey: Keys.thumbnailSize) }
+    }
+    var showInspector: Bool {
+        didSet { defaults.set(showInspector, forKey: Keys.showInspector) }
+    }
+    var showFilmstrip: Bool {
+        didSet { defaults.set(showFilmstrip, forKey: Keys.showFilmstrip) }
+    }
+    var showHidden: Bool {
+        didSet { defaults.set(showHidden, forKey: Keys.showHidden); reload() }
+    }
+    var enlargeSmallImages: Bool {
+        didSet { defaults.set(enlargeSmallImages, forKey: Keys.enlargeSmallImages) }
+    }
+
+    // MARK: Internals
+
+    @ObservationIgnored weak var undoManager: UndoManager?
+    @ObservationIgnored private let defaults = UserDefaults.standard
+    @ObservationIgnored private var renameItem: FileItem?
+    @ObservationIgnored private var watcher: FolderWatcher?
+    @ObservationIgnored private var keyMonitor: Any?
+    @ObservationIgnored private var loadTask: Task<Void, Never>?
+    @ObservationIgnored private var imageTask: Task<Void, Never>?
+    @ObservationIgnored private var didStart = false
+    @ObservationIgnored private var hasExplicitOpen = false
+
+    private enum Keys {
+        static let sortKey = "sortKey"
+        static let sortAscending = "sortAscending"
+        static let thumbnailSize = "thumbnailSize"
+        static let showInspector = "showInspector"
+        static let showFilmstrip = "showFilmstrip"
+        static let showHidden = "showHidden"
+        static let enlargeSmallImages = "enlargeSmallImages"
+        static let lastFolder = "lastFolder"
+        static let recentFolders = "recentFolders"
+    }
+
+    private init() {
+        let d = UserDefaults.standard
+        sortKey = SortKey(rawValue: d.string(forKey: Keys.sortKey) ?? "") ?? .name
+        sortAscending = d.object(forKey: Keys.sortAscending) as? Bool ?? true
+        thumbnailSize = d.object(forKey: Keys.thumbnailSize) as? Double ?? 160
+        showInspector = d.bool(forKey: Keys.showInspector)
+        showFilmstrip = d.object(forKey: Keys.showFilmstrip) as? Bool ?? true
+        showHidden = d.bool(forKey: Keys.showHidden)
+        enlargeSmallImages = d.object(forKey: Keys.enlargeSmallImages) as? Bool ?? true
+        recentFolders = (d.stringArray(forKey: Keys.recentFolders) ?? [])
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+    }
+
+    // MARK: Derived state
+
+    var isViewing: Bool { viewerIndex != nil }
+    var gridItems: [FileItem] { folders + images }
+    var canGoBack: Bool { !backStack.isEmpty }
+    var canGoForward: Bool { !forwardStack.isEmpty }
+    var canGoUp: Bool { folder.map { $0.path != "/" } ?? false }
+
+    var currentItem: FileItem? {
+        guard let index = viewerIndex, images.indices.contains(index) else { return nil }
+        return images[index]
+    }
+
+    var selectedItem: FileItem? {
+        guard let selection else { return nil }
+        return folders.first { $0.url == selection } ?? images.first { $0.url == selection }
+    }
+
+    /// What the inspector describes: the open image, or the grid selection.
+    var inspectedItem: FileItem? { currentItem ?? selectedItem }
+
+    /// The image that menu/toolbar file actions apply to.
+    var actionImage: FileItem? {
+        guard let item = isViewing ? currentItem : selectedItem, !item.isDirectory else { return nil }
+        return item
+    }
+
+    var folderDisplayName: String {
+        guard let folder else { return "Image Viewer" }
+        return FileManager.default.displayName(atPath: folder.path)
+    }
+
+    // MARK: Startup & opening
+
+    func start() {
+        installKeyMonitor()
+    }
+
+    /// Called once launching finishes, after any files Finder asked us to open have arrived,
+    /// so a launch via "Open With" doesn't first flash the last-used folder.
+    func openDefaultFolderIfNeeded() {
+        guard !didStart else { return }
+        didStart = true
+        if folder != nil || hasExplicitOpen { return }
+
+        // `ImageViewer /some/path` from a terminal.
+        if let arg = CommandLine.arguments.dropFirst().first(where: { !$0.hasPrefix("-") && FileManager.default.fileExists(atPath: $0) }) {
+            open(URL(fileURLWithPath: arg))
+            return
+        }
+        if let last = defaults.string(forKey: Keys.lastFolder), FileManager.default.fileExists(atPath: last) {
+            navigate(to: URL(fileURLWithPath: last, isDirectory: true), recordHistory: false)
+        } else if let pictures = FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask).first {
+            navigate(to: pictures, recordHistory: false)
+        }
+    }
+
+    /// Opens a folder (browse it) or an image (browse its folder and show the image).
+    func open(_ url: URL) {
+        hasExplicitOpen = true
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            errorMessage = "“\(url.path)” doesn't exist."
+            return
+        }
+        let isPackage = (try? url.resourceValues(forKeys: [.isPackageKey]))?.isPackage ?? false
+        if isDirectory.boolValue && !isPackage {
+            navigate(to: url)
+        } else {
+            navigate(to: url.deletingLastPathComponent(), select: url, openViewer: true)
+        }
+    }
+
+    func showOpenPanel() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.image, .folder]
+        panel.directoryURL = folder
+        panel.message = "Choose a folder to browse, or an image to open"
+        if panel.runModal() == .OK, let url = panel.url {
+            open(url)
+        }
+    }
+
+    func presentGoToFolder() {
+        goToFolderText = (folder?.path as NSString?)?.abbreviatingWithTildeInPath ?? "~"
+        isGoToFolderPresented = true
+    }
+
+    func goToFolder(path: String) {
+        let expanded = (path.trimmingCharacters(in: .whitespaces) as NSString).expandingTildeInPath
+        guard !expanded.isEmpty else { return }
+        open(URL(fileURLWithPath: expanded))
+    }
+
+    // MARK: Folder navigation
+
+    func navigate(to url: URL, select: URL? = nil, openViewer: Bool = false, recordHistory: Bool = true) {
+        // Resolve symlinks (e.g. /tmp → /private/tmp) so paths compare equal to the scanned items.
+        let url = URL(fileURLWithPath: Self.canonicalPath(url), isDirectory: true)
+        let select = select.map { URL(fileURLWithPath: Self.canonicalPath($0)) }
+        let changed = folder?.path != url.path
+        if recordHistory, changed, let folder {
+            backStack.append(folder)
+            forwardStack.removeAll()
+        }
+        closeViewer()
+        if changed {
+            folder = url
+            folders = []
+            images = []
+            selection = nil
+            folderError = nil
+            watcher = FolderWatcher(url: url) { [weak self] in self?.reload() }
+            remember(url)
+        }
+        load(select: select, viewing: openViewer ? select : nil)
+    }
+
+    private nonisolated static func canonicalPath(_ url: URL) -> String {
+        guard let resolved = realpath(url.path, nil) else { return url.standardizedFileURL.path }
+        defer { free(resolved) }
+        return String(cString: resolved)
+    }
+
+    func goBack() {
+        guard let previous = backStack.popLast(), let current = folder else { return }
+        forwardStack.append(current)
+        navigate(to: previous, select: current, recordHistory: false)
+    }
+
+    func goForward() {
+        guard let next = forwardStack.popLast(), let current = folder else { return }
+        backStack.append(current)
+        navigate(to: next, recordHistory: false)
+    }
+
+    func goToEnclosingFolder() {
+        guard let folder, canGoUp else { return }
+        navigate(to: folder.deletingLastPathComponent(), select: folder)
+    }
+
+    func goToStandardFolder(_ directory: FileManager.SearchPathDirectory) {
+        if let url = FileManager.default.urls(for: directory, in: .userDomainMask).first {
+            navigate(to: url)
+        }
+    }
+
+    func goHome() {
+        navigate(to: FileManager.default.homeDirectoryForCurrentUser)
+    }
+
+    func reload() {
+        load(select: selection, viewing: isViewing ? displayedURL : nil, fallbackIndex: viewerIndex)
+    }
+
+    private func remember(_ url: URL) {
+        defaults.set(url.path, forKey: Keys.lastFolder)
+        recentFolders.removeAll { $0.path == url.path }
+        recentFolders.insert(url, at: 0)
+        recentFolders = Array(recentFolders.prefix(10))
+        defaults.set(recentFolders.map(\.path), forKey: Keys.recentFolders)
+    }
+
+    private func load(select: URL?, viewing: URL?, fallbackIndex: Int? = nil) {
+        guard let folder else { return }
+        loadTask?.cancel()
+        isLoadingFolder = true
+        let showHidden = showHidden
+        loadTask = Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                BrowserModel.scan(folder, showHidden: showHidden)
+            }.value
+            guard let self, !Task.isCancelled, self.folder == folder else { return }
+            self.apply(result, select: select, viewing: viewing, fallbackIndex: fallbackIndex)
+        }
+    }
+
+    private nonisolated static func scan(_ folder: URL, showHidden: Bool) -> Result<[FileItem], Error> {
+        do {
+            let urls = try FileManager.default.contentsOfDirectory(
+                at: folder,
+                includingPropertiesForKeys: FileItem.resourceKeys,
+                options: showHidden ? [] : [.skipsHiddenFiles]
+            )
+            return .success(urls.compactMap(FileItem.init(url:)))
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    private func apply(_ result: Result<[FileItem], Error>, select: URL?, viewing: URL?, fallbackIndex: Int?) {
+        isLoadingFolder = false
+        switch result {
+        case .success(let items):
+            folderError = nil
+            folders = items.filter(\.isDirectory)
+            images = items.filter { !$0.isDirectory }
+            sortItems()
+        case .failure(let error):
+            folders = []
+            images = []
+            folderError = error.localizedDescription
+        }
+
+        let items = gridItems
+        if let select, let match = items.first(where: { $0.url.path == select.path }) {
+            selection = match.url
+        } else if let current = selection, items.contains(where: { $0.url == current }) {
+            // keep the current selection
+        } else {
+            selection = images.first?.url ?? folders.first?.url
+        }
+
+        if let viewing {
+            if let index = images.firstIndex(where: { $0.url.path == viewing.path }) {
+                openImage(at: index)
+            } else if let fallbackIndex, !images.isEmpty {
+                // The open image disappeared (deleted or renamed outside the app).
+                displayedURL = nil
+                openImage(at: min(fallbackIndex, images.count - 1))
+            } else {
+                closeViewer()
+            }
+        }
+    }
+
+    private func sortItems() {
+        folders.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        let key = sortKey
+        let ascending = sortAscending
+        images.sort { a, b in
+            let (x, y) = ascending ? (a, b) : (b, a)
+            switch key {
+            case .name:
+                return x.name.localizedStandardCompare(y.name) == .orderedAscending
+            case .modified:
+                if x.modified != y.modified { return x.modified < y.modified }
+            case .created:
+                if x.created != y.created { return x.created < y.created }
+            case .size:
+                if x.size != y.size { return x.size < y.size }
+            }
+            return a.name.localizedStandardCompare(b.name) == .orderedAscending
+        }
+    }
+
+    private func applySort() {
+        sortItems()
+        if isViewing, let url = displayedURL {
+            viewerIndex = images.firstIndex { $0.url == url }
+        }
+    }
+
+    // MARK: Grid selection
+
+    func moveSelection(by delta: Int) {
+        let items = gridItems
+        guard !items.isEmpty else { return }
+        guard let current = selection, let index = items.firstIndex(where: { $0.url == current }) else {
+            selection = items.first?.url
+            return
+        }
+        let target = index + delta
+        guard items.indices.contains(target) else {
+            // Up/down past the edge: stop at first/last, like Finder.
+            selection = items[max(0, min(items.count - 1, target))].url
+            return
+        }
+        selection = items[target].url
+    }
+
+    func activate(_ item: FileItem) {
+        if item.isDirectory {
+            navigate(to: item.url)
+        } else if let index = images.firstIndex(where: { $0.url == item.url }) {
+            openImage(at: index)
+        }
+    }
+
+    func openSelection() {
+        if let item = selectedItem { activate(item) }
+    }
+
+    // MARK: Viewer
+
+    func openImage(at index: Int) {
+        guard images.indices.contains(index) else { return }
+        let item = images[index]
+        viewerIndex = index
+        selection = item.url
+        guard item.url != displayedURL else { return }
+
+        displayedURL = item.url
+        imageError = nil
+        imageTask?.cancel()
+        if let full = ImageLoader.shared.cachedImage(for: item.url) {
+            currentImage = full
+            isLoadingImage = false
+        } else {
+            currentImage = ImageLoader.shared.placeholder(for: item.url)
+            isLoadingImage = true
+        }
+
+        imageTask = Task { [weak self] in
+            let image = await ImageLoader.shared.load(item.url)
+            guard let self, !Task.isCancelled, self.displayedURL == item.url else { return }
+            self.isLoadingImage = false
+            if let image {
+                self.currentImage = image
+            } else {
+                self.currentImage = nil
+                self.imageError = "“\(item.name)” couldn't be opened."
+            }
+            self.preloadNeighbors(of: item.url)
+        }
+    }
+
+    private func preloadNeighbors(of url: URL) {
+        guard let index = images.firstIndex(where: { $0.url == url }) else { return }
+        for neighbor in [index + 1, index - 1] where images.indices.contains(neighbor) {
+            let neighborURL = images[neighbor].url
+            Task.detached(priority: .utility) { _ = await ImageLoader.shared.load(neighborURL) }
+        }
+    }
+
+    func closeViewer() {
+        imageTask?.cancel()
+        viewerIndex = nil
+        displayedURL = nil
+        currentImage = nil
+        isLoadingImage = false
+        imageError = nil
+        zoomPercent = nil
+    }
+
+    func toggleViewer() {
+        if isViewing {
+            closeViewer()
+        } else {
+            openSelection()
+        }
+    }
+
+    /// Next/previous image in the viewer, or next/previous item in the grid.
+    func step(_ delta: Int) {
+        guard let index = viewerIndex else {
+            moveSelection(by: delta)
+            return
+        }
+        let target = index + delta
+        if images.indices.contains(target) {
+            openImage(at: target)
+        } else {
+            NSSound.beep()
+        }
+    }
+
+    func showFirst() {
+        if isViewing { openImage(at: 0) } else { selection = gridItems.first?.url }
+    }
+
+    func showLast() {
+        if isViewing { openImage(at: images.count - 1) } else { selection = gridItems.last?.url }
+    }
+
+    func zoom(_ action: ZoomAction) {
+        if isViewing {
+            zoomRequest = ZoomRequest(action: action)
+            return
+        }
+        switch action {
+        case .zoomIn: thumbnailSize = min(400, thumbnailSize + 40)
+        case .zoomOut: thumbnailSize = max(80, thumbnailSize - 40)
+        case .fit, .actualSize: thumbnailSize = 160
+        }
+    }
+
+    /// Full screen with the sidebar tucked away — the "as big as possible" mode.
+    func toggleFullScreen() {
+        guard let window = NSApp.mainWindow ?? NSApp.keyWindow else { return }
+        let entering = !window.styleMask.contains(.fullScreen)
+        columnVisibility = entering ? .detailOnly : .all
+        window.toggleFullScreen(nil)
+    }
+
+    // MARK: File actions
+
+    func moveToTrash(_ item: FileItem? = nil) {
+        guard let item = item ?? actionImage, !item.isDirectory else { return }
+        do {
+            var resulting: NSURL?
+            try FileManager.default.trashItem(at: item.url, resultingItemURL: &resulting)
+            ImageLoader.shared.invalidate(item.url)
+            removeFromList(item)
+            if let trashed = resulting as URL? {
+                undoManager?.registerUndo(withTarget: self) { model in
+                    MainActor.assumeIsolated { model.restore(item.url, from: trashed) }
+                }
+                undoManager?.setActionName("Move to Trash")
+            }
+            showToast("Moved “\(item.name)” to the Trash", canUndo: resulting != nil)
+        } catch {
+            errorMessage = "Couldn't move “\(item.name)” to the Trash.\n\(error.localizedDescription)"
+        }
+    }
+
+    private func removeFromList(_ item: FileItem) {
+        let gridIndex = gridItems.firstIndex { $0.url == item.url }
+        guard let index = images.firstIndex(where: { $0.url == item.url }) else { return }
+        images.remove(at: index)
+
+        if displayedURL == item.url {
+            displayedURL = nil
+            if images.isEmpty {
+                closeViewer()
+            } else {
+                openImage(at: min(index, images.count - 1))
+            }
+        } else if isViewing, let url = displayedURL {
+            viewerIndex = images.firstIndex { $0.url == url }
+        } else if selection == item.url {
+            let items = gridItems
+            if let gridIndex, !items.isEmpty {
+                selection = items[min(gridIndex, items.count - 1)].url
+            } else {
+                selection = nil
+            }
+        }
+    }
+
+    private func restore(_ original: URL, from trashed: URL) {
+        do {
+            try FileManager.default.moveItem(at: trashed, to: original)
+            undoManager?.registerUndo(withTarget: self) { model in
+                MainActor.assumeIsolated {
+                    if let item = FileItem(url: original) { model.moveToTrash(item) }
+                }
+            }
+            undoManager?.setActionName("Move to Trash")
+            if folder?.path == original.deletingLastPathComponent().path {
+                load(select: original, viewing: isViewing ? original : nil)
+            }
+            showToast("Restored “\(original.lastPathComponent)”", canUndo: false)
+        } catch {
+            errorMessage = "Couldn't restore “\(original.lastPathComponent)”.\n\(error.localizedDescription)"
+        }
+    }
+
+    func beginRename(_ item: FileItem? = nil) {
+        guard let item = item ?? actionImage else { return }
+        renameItem = item
+        renameText = item.url.deletingPathExtension().lastPathComponent
+        isRenamePresented = true
+    }
+
+    func commitRename() {
+        guard let item = renameItem else { return }
+        renameItem = nil
+        let base = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty, !base.contains("/"), !base.hasPrefix(".") else {
+            errorMessage = "“\(base)” isn't a valid name."
+            return
+        }
+        let ext = item.url.pathExtension
+        let destination = item.url.deletingLastPathComponent()
+            .appendingPathComponent(ext.isEmpty ? base : "\(base).\(ext)")
+        rename(from: item.url, to: destination)
+    }
+
+    private func rename(from source: URL, to destination: URL) {
+        guard source.path != destination.path else { return }
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            errorMessage = "An item named “\(destination.lastPathComponent)” already exists."
+            return
+        }
+        do {
+            try FileManager.default.moveItem(at: source, to: destination)
+        } catch {
+            errorMessage = "Couldn't rename “\(source.lastPathComponent)”.\n\(error.localizedDescription)"
+            return
+        }
+        ImageLoader.shared.invalidate(source)
+        let wasViewing = displayedURL == source
+        if wasViewing {
+            // Same pixels, new name: keep showing the current image without a reload.
+            displayedURL = destination
+        }
+        load(select: destination, viewing: wasViewing ? destination : nil)
+        undoManager?.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated { model.rename(from: destination, to: source) }
+        }
+        undoManager?.setActionName("Rename")
+    }
+
+    func revealInFinder(_ item: FileItem? = nil) {
+        if let url = (item ?? (isViewing ? currentItem : selectedItem))?.url ?? folder {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+    }
+
+    func openWithDefaultApp(_ item: FileItem? = nil) {
+        guard let item = item ?? actionImage else { return }
+        NSWorkspace.shared.open(item.url)
+    }
+
+    func openInPreview(_ item: FileItem? = nil) {
+        guard let item = item ?? actionImage,
+              let preview = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Preview")
+        else { return }
+        NSWorkspace.shared.open([item.url], withApplicationAt: preview, configuration: NSWorkspace.OpenConfiguration())
+    }
+
+    /// Puts both the file and its pixels on the clipboard: pastes as a file in Finder, as an image elsewhere.
+    func copyImage(_ item: FileItem? = nil) {
+        guard let item = item ?? actionImage else { return }
+        let pasteboardItem = NSPasteboardItem()
+        pasteboardItem.setString(item.url.absoluteString, forType: .fileURL)
+        let image = (displayedURL == item.url ? currentImage : nil) ?? NSImage(contentsOf: item.url)
+        if let tiff = image?.tiffRepresentation {
+            pasteboardItem.setData(tiff, forType: .tiff)
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects([pasteboardItem])
+        showToast("Copied “\(item.name)”", canUndo: false)
+    }
+
+    func copyPath(_ item: FileItem? = nil) {
+        guard let url = (item ?? (isViewing ? currentItem : selectedItem))?.url ?? folder else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.path, forType: .string)
+        showToast("Copied path", canUndo: false)
+    }
+
+    func showToast(_ message: String, canUndo: Bool) {
+        let toast = Toast(message: message, canUndo: canUndo)
+        withAnimation(.easeOut(duration: 0.2)) { self.toast = toast }
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(canUndo ? 5 : 2))
+            guard let self, self.toast?.id == toast.id else { return }
+            withAnimation(.easeIn(duration: 0.2)) { self.toast = nil }
+        }
+    }
+
+    // MARK: Keyboard
+
+    private func installKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            return MainActor.assumeIsolated { self.handleKey(event) } ? nil : event
+        }
+    }
+
+    /// Plain (unmodified) keys. Command shortcuts live in the menus (see AppCommands).
+    private func handleKey(_ event: NSEvent) -> Bool {
+        guard let window = event.window,
+              !(window is NSPanel),
+              window.attachedSheet == nil,
+              window.sheetParent == nil,
+              !(window.firstResponder is NSText) // typing in a text field
+        else { return false }
+
+        let modifiers = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting([.numericPad, .function, .capsLock])
+        guard modifiers.isEmpty else { return false }
+
+        switch event.keyCode {
+        case 123: step(-1) // ←
+        case 124: step(1) // →
+        case 125: isViewing ? step(1) : moveSelection(by: gridColumns) // ↓
+        case 126: isViewing ? step(-1) : moveSelection(by: -gridColumns) // ↑
+        case 36, 76: // return / enter
+            guard !isViewing else { return false }
+            openSelection()
+        case 49: toggleViewer() // space
+        case 53: // escape
+            guard isViewing else { return false }
+            closeViewer()
+        case 115: showFirst() // home
+        case 119: showLast() // end
+        default:
+            if event.charactersIgnoringModifiers == "f" {
+                toggleFullScreen()
+            } else {
+                return false
+            }
+        }
+        return true
+    }
+}
+
+/// Watches a folder so files added/removed/renamed outside the app show up.
+final class FolderWatcher {
+    private let source: DispatchSourceFileSystemObject
+    private var pending: DispatchWorkItem?
+
+    init?(url: URL, onChange: @escaping @MainActor () -> Void) {
+        let descriptor = open(url.path, O_EVTONLY)
+        guard descriptor >= 0 else { return nil }
+        source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor, eventMask: [.write, .rename, .delete], queue: .main
+        )
+        source.setEventHandler { [weak self] in
+            // Debounce bursts (e.g. copying many files in).
+            self?.pending?.cancel()
+            let work = DispatchWorkItem { MainActor.assumeIsolated { onChange() } }
+            self?.pending = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+        }
+        source.setCancelHandler { close(descriptor) }
+        source.resume()
+    }
+
+    deinit {
+        pending?.cancel()
+        source.cancel()
+    }
+}

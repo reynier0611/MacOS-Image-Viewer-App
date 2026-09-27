@@ -1,0 +1,86 @@
+import SwiftUI
+
+struct AppCommands: Commands {
+    @Bindable var model: BrowserModel
+
+    var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("Open…") { model.showOpenPanel() }
+                .keyboardShortcut("o")
+            Button("Go to Folder…") { model.presentGoToFolder() }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+        }
+
+        CommandGroup(after: .newItem) {
+            Divider()
+            Button("Open in Preview") { model.openInPreview() }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+            Button("Open with Default App") { model.openWithDefaultApp() }
+            Button("Reveal in Finder") { model.revealInFinder() }
+                .keyboardShortcut("r")
+            Divider()
+            Button("Rename…") { model.beginRename() }
+            Button("Move to Trash") { model.moveToTrash() }
+                .keyboardShortcut(.delete)
+        }
+
+        CommandGroup(after: .pasteboard) {
+            Divider()
+            Button("Copy Image") { model.copyImage() }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
+            Button("Copy Path") { model.copyPath() }
+                .keyboardShortcut("c", modifiers: [.command, .option])
+        }
+
+        CommandGroup(after: .toolbar) {
+            Toggle("Show Inspector", isOn: $model.showInspector)
+                .keyboardShortcut("i")
+            Toggle("Show Filmstrip", isOn: $model.showFilmstrip)
+                .keyboardShortcut("f", modifiers: [.command, .option])
+            Divider()
+            Button("Zoom In") { model.zoom(.zoomIn) }
+                .keyboardShortcut("=")
+            Button("Zoom Out") { model.zoom(.zoomOut) }
+                .keyboardShortcut("-")
+            Button("Zoom to Fit") { model.zoom(.fit) }
+                .keyboardShortcut("9")
+            Button("Actual Size") { model.zoom(.actualSize) }
+                .keyboardShortcut("0")
+            Toggle("Enlarge Small Images to Fit", isOn: $model.enlargeSmallImages)
+            Divider()
+            Picker("Sort By", selection: $model.sortKey) {
+                ForEach(SortKey.allCases) { Text($0.rawValue).tag($0) }
+            }
+            Toggle("Sort Ascending", isOn: $model.sortAscending)
+            Toggle("Show Hidden Files", isOn: $model.showHidden)
+                .keyboardShortcut(".", modifiers: [.command, .shift])
+            Divider()
+        }
+
+        CommandMenu("Go") {
+            Button("Back") { model.goBack() }
+                .keyboardShortcut("[")
+            Button("Forward") { model.goForward() }
+                .keyboardShortcut("]")
+            Button("Enclosing Folder") { model.goToEnclosingFolder() }
+                .keyboardShortcut(.upArrow)
+            Button("Open Selection") { model.openSelection() }
+                .keyboardShortcut(.downArrow)
+            Divider()
+            // Plain arrow keys are handled directly (see BrowserModel.handleKey) so they
+            // don't hijack text fields; these items are here for discoverability.
+            Button("Next Image  (→)") { model.step(1) }
+            Button("Previous Image  (←)") { model.step(-1) }
+            Button("Close Image  (Esc)") { model.closeViewer() }
+            Divider()
+            Button("Home") { model.goHome() }
+                .keyboardShortcut("h", modifiers: [.command, .shift])
+            Button("Desktop") { model.goToStandardFolder(.desktopDirectory) }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+            Button("Downloads") { model.goToStandardFolder(.downloadsDirectory) }
+                .keyboardShortcut("l", modifiers: [.command, .option])
+            Button("Pictures") { model.goToStandardFolder(.picturesDirectory) }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+        }
+    }
+}

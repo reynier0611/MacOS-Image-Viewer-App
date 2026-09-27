@@ -1,0 +1,201 @@
+import Foundation
+import ImageIO
+import UniformTypeIdentifiers
+
+struct MetadataRow: Identifiable {
+    let id = UUID()
+    let label: String
+    let value: String
+}
+
+struct MetadataSection: Identifiable {
+    let id = UUID()
+    let title: String
+    let rows: [MetadataRow]
+}
+
+struct ImageMetadata {
+    var sections: [MetadataSection] = []
+    var rawProperties: [MetadataRow] = []
+    var latitude: Double?
+    var longitude: Double?
+
+    static func load(for url: URL) -> ImageMetadata {
+        var metadata = ImageMetadata()
+        let values = try? url.resourceValues(forKeys: [
+            .contentTypeKey, .fileSizeKey, .creationDateKey, .contentModificationDateKey, .isDirectoryKey,
+        ])
+
+        var general = [MetadataRow(label: "Name", value: url.lastPathComponent)]
+        if let type = values?.contentType {
+            general.append(.init(label: "Kind", value: type.localizedDescription ?? type.identifier))
+        }
+        if let size = values?.fileSize {
+            general.append(.init(label: "Size", value: ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)))
+        }
+        if let created = values?.creationDate {
+            general.append(.init(label: "Created", value: created.formatted(date: .abbreviated, time: .shortened)))
+        }
+        if let modified = values?.contentModificationDate {
+            general.append(.init(label: "Modified", value: modified.formatted(date: .abbreviated, time: .shortened)))
+        }
+        general.append(.init(label: "Where", value: (url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath))
+        metadata.sections.append(.init(title: "General", rows: general))
+
+        guard values?.isDirectory != true,
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        else { return metadata }
+
+        let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
+        let exifAux = props[kCGImagePropertyExifAuxDictionary] as? [CFString: Any] ?? [:]
+        let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
+        let gps = props[kCGImagePropertyGPSDictionary] as? [CFString: Any] ?? [:]
+
+        // Image
+        var image: [MetadataRow] = []
+        if let width = number(props[kCGImagePropertyPixelWidth]), let height = number(props[kCGImagePropertyPixelHeight]) {
+            image.append(.init(label: "Dimensions", value: "\(Int(width)) × \(Int(height))"))
+            image.append(.init(label: "Megapixels", value: String(format: "%.1f MP", width * height / 1_000_000)))
+        }
+        let frameCount = CGImageSourceGetCount(source)
+        if frameCount > 1 {
+            image.append(.init(label: "Frames", value: "\(frameCount)"))
+        }
+        if let dpi = number(props[kCGImagePropertyDPIWidth]) {
+            image.append(.init(label: "Resolution", value: "\(Int(dpi.rounded())) DPI"))
+        }
+        if let depth = number(props[kCGImagePropertyDepth]) {
+            image.append(.init(label: "Bit Depth", value: "\(Int(depth))"))
+        }
+        if let model = props[kCGImagePropertyColorModel] as? String {
+            image.append(.init(label: "Color Model", value: model))
+        }
+        if let profile = props[kCGImagePropertyProfileName] as? String {
+            image.append(.init(label: "Color Profile", value: profile))
+        }
+        if let hasAlpha = props[kCGImagePropertyHasAlpha] as? Bool {
+            image.append(.init(label: "Alpha", value: hasAlpha ? "Yes" : "No"))
+        }
+        if let orientation = number(props[kCGImagePropertyOrientation]), orientation != 1 {
+            image.append(.init(label: "Orientation", value: orientationName(Int(orientation))))
+        }
+        if !image.isEmpty { metadata.sections.append(.init(title: "Image", rows: image)) }
+
+        // Camera
+        var camera: [MetadataRow] = []
+        let make = (tiff[kCGImagePropertyTIFFMake] as? String)?.trimmingCharacters(in: .whitespaces)
+        let model = (tiff[kCGImagePropertyTIFFModel] as? String)?.trimmingCharacters(in: .whitespaces)
+        if let model {
+            let full = if let make, !model.lowercased().hasPrefix(make.lowercased()) { "\(make) \(model)" } else { model }
+            camera.append(.init(label: "Camera", value: full))
+        } else if let make {
+            camera.append(.init(label: "Camera", value: make))
+        }
+        if let lens = (exif[kCGImagePropertyExifLensModel] as? String) ?? (exifAux[kCGImagePropertyExifAuxLensModel] as? String) {
+            camera.append(.init(label: "Lens", value: lens))
+        }
+        if let focal = number(exif[kCGImagePropertyExifFocalLength]) {
+            var value = String(format: "%g mm", (focal * 10).rounded() / 10)
+            if let equiv = number(exif[kCGImagePropertyExifFocalLenIn35mmFilm]), equiv > 0 {
+                value += " (\(Int(equiv)) mm equiv.)"
+            }
+            camera.append(.init(label: "Focal Length", value: value))
+        }
+        if let fNumber = number(exif[kCGImagePropertyExifFNumber]) {
+            camera.append(.init(label: "Aperture", value: String(format: "ƒ/%g", (fNumber * 10).rounded() / 10)))
+        }
+        if let exposure = number(exif[kCGImagePropertyExifExposureTime]), exposure > 0 {
+            let value = exposure < 1 ? "1/\(Int((1 / exposure).rounded())) s" : String(format: "%g s", exposure)
+            camera.append(.init(label: "Shutter", value: value))
+        }
+        if let iso = (exif[kCGImagePropertyExifISOSpeedRatings] as? [NSNumber])?.first {
+            camera.append(.init(label: "ISO", value: "\(iso.intValue)"))
+        }
+        if let bias = number(exif[kCGImagePropertyExifExposureBiasValue]), bias != 0 {
+            camera.append(.init(label: "Exposure Bias", value: String(format: "%+.1f EV", bias)))
+        }
+        if let flash = number(exif[kCGImagePropertyExifFlash]) {
+            camera.append(.init(label: "Flash", value: Int(flash) & 1 == 1 ? "Fired" : "Did not fire"))
+        }
+        if let taken = exif[kCGImagePropertyExifDateTimeOriginal] as? String {
+            camera.append(.init(label: "Date Taken", value: formatExifDate(taken)))
+        }
+        if let software = tiff[kCGImagePropertyTIFFSoftware] as? String {
+            camera.append(.init(label: "Software", value: software))
+        }
+        if !camera.isEmpty { metadata.sections.append(.init(title: "Camera", rows: camera)) }
+
+        // Location
+        if var latitude = number(gps[kCGImagePropertyGPSLatitude]),
+           var longitude = number(gps[kCGImagePropertyGPSLongitude]) {
+            if (gps[kCGImagePropertyGPSLatitudeRef] as? String) == "S" { latitude = -latitude }
+            if (gps[kCGImagePropertyGPSLongitudeRef] as? String) == "W" { longitude = -longitude }
+            var location = [
+                MetadataRow(label: "Latitude", value: String(format: "%.6f", latitude)),
+                MetadataRow(label: "Longitude", value: String(format: "%.6f", longitude)),
+            ]
+            if let altitude = number(gps[kCGImagePropertyGPSAltitude]) {
+                location.append(.init(label: "Altitude", value: String(format: "%.0f m", altitude)))
+            }
+            metadata.sections.append(.init(title: "Location", rows: location))
+            metadata.latitude = latitude
+            metadata.longitude = longitude
+        }
+
+        if let all = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] {
+            metadata.rawProperties = flatten(all, prefix: "")
+        }
+        return metadata
+    }
+
+    private static func number(_ value: Any?) -> Double? {
+        (value as? NSNumber)?.doubleValue
+    }
+
+    private static func flatten(_ dict: [String: Any], prefix: String) -> [MetadataRow] {
+        var rows: [MetadataRow] = []
+        for key in dict.keys.sorted() {
+            let name = key.trimmingCharacters(in: CharacterSet(charactersIn: "{}"))
+            let label = prefix.isEmpty ? name : "\(prefix) › \(name)"
+            switch dict[key] {
+            case let nested as [String: Any]:
+                rows += flatten(nested, prefix: label)
+            case let array as [Any]:
+                rows.append(.init(label: label, value: array.map { "\($0)" }.joined(separator: ", ")))
+            case let data as Data:
+                rows.append(.init(label: label, value: "<\(data.count) bytes>"))
+            case let value?:
+                rows.append(.init(label: label, value: String("\(value)".prefix(300))))
+            case nil:
+                break
+            }
+        }
+        return rows
+    }
+
+    private static let exifDateParser: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
+        return formatter
+    }()
+
+    private static func formatExifDate(_ string: String) -> String {
+        guard let date = exifDateParser.date(from: string) else { return string }
+        return date.formatted(date: .abbreviated, time: .standard)
+    }
+
+    private static func orientationName(_ value: Int) -> String {
+        switch value {
+        case 2: "Mirrored horizontal"
+        case 3: "Rotated 180°"
+        case 4: "Mirrored vertical"
+        case 5: "Mirrored, rotated 90° CCW"
+        case 6: "Rotated 90° CW"
+        case 7: "Mirrored, rotated 90° CW"
+        case 8: "Rotated 90° CCW"
+        default: "Normal"
+        }
+    }
+}
