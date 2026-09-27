@@ -1,12 +1,12 @@
 # Image Viewer
 
-A native macOS image viewer and browser (SwiftUI, macOS 14 Sonoma or later, Apple Silicon and Intel).
+A native macOS image viewer and browser (SwiftUI, macOS 14 Sonoma or later, Apple Silicon and Intel). Always uses the light theme, even when the Mac is in Dark Mode.
 
 - Browse any folder as a grid of thumbnails, with a sidebar (Favorites, drives, recent folders) and a clickable path bar.
 - Open an image to see it as large as the window allows. Use ← → to go through the folder, and Esc to go back to the grid.
 - Zoom (pinch, ⌘= / ⌘-, double-click for 100%), drag to pan, full screen with **F**.
 - Filmstrip under the viewer, and an inspector (⌘I) with file info, dimensions, camera EXIF and GPS (with "Show in Maps").
-- Move to Trash (⌘⌫) with Undo (⌘Z). Also Rename, Copy Image, Copy Path, Reveal in Finder, Open in Preview, and Share/AirDrop.
+- Select several images in the grid (⌘-click, ⇧-click, ⌘A) and move them all to the Trash at once (⌘⌫). Undo (⌘Z) brings them all back. Also Rename, Copy Image, Copy Path, Reveal in Finder, Open in Preview, and Share/AirDrop.
 - Sort by name, date or size. Changes made to the folder outside the app show up automatically.
 - Open from Finder (right-click an image or folder, then **Open With ▸ Image Viewer**), drag onto the window or Dock icon, or use ⌘O.
 
@@ -42,6 +42,10 @@ The first time you browse Desktop, Documents, Downloads or an external drive, ma
 | In the grid | |
 |---|---|
 | ← → ↑ ↓ | Move selection |
+| ⌘-click | Add or remove an image from the selection |
+| ⇧-click | Add a range to the selection |
+| ⌘A | Select all |
+| Esc | Collapse a multi-selection to one item |
 | Return / Space / ⌘↓ | Open image or folder |
 | ⌘↑ | Enclosing folder |
 | ⌘[ / ⌘] | Back / Forward |

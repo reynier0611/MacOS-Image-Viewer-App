@@ -30,7 +30,15 @@ final class BrowserModel {
     private(set) var images: [FileItem] = []
     private(set) var folderError: String?
     private(set) var isLoadingFolder = false
-    var selection: URL?
+    /// The focused item: arrow keys move it, the inspector shows it. Setting it collapses
+    /// the multi-selection to just this item (except inside `adjustingSelection`).
+    var selection: URL? {
+        didSet {
+            if !isAdjustingSelection { selectedURLs = selection.map { [$0] } ?? [] }
+        }
+    }
+    /// Everything highlighted in the grid (⌘-click / ⇧-click / ⌘A).
+    private(set) var selectedURLs: Set<URL> = []
 
     private(set) var backStack: [URL] = []
     private(set) var forwardStack: [URL] = []
@@ -92,6 +100,7 @@ final class BrowserModel {
     @ObservationIgnored private var imageTask: Task<Void, Never>?
     @ObservationIgnored private var didStart = false
     @ObservationIgnored private var hasExplicitOpen = false
+    @ObservationIgnored private var isAdjustingSelection = false
 
     private enum Keys {
         static let sortKey = "sortKey"
@@ -134,6 +143,11 @@ final class BrowserModel {
     var selectedItem: FileItem? {
         guard let selection else { return nil }
         return folders.first { $0.url == selection } ?? images.first { $0.url == selection }
+    }
+
+    /// Selected images in grid order (folders are never trashed).
+    var selectedImages: [FileItem] {
+        images.filter { selectedURLs.contains($0.url) }
     }
 
     /// What the inspector describes: the open image, or the grid selection.
@@ -284,7 +298,7 @@ final class BrowserModel {
         defaults.set(recentFolders.map(\.path), forKey: Keys.recentFolders)
     }
 
-    private func load(select: URL?, viewing: URL?, fallbackIndex: Int? = nil) {
+    private func load(select: URL?, viewing: URL?, fallbackIndex: Int? = nil, alsoSelect: [URL] = []) {
         guard let folder else { return }
         loadTask?.cancel()
         isLoadingFolder = true
@@ -294,7 +308,7 @@ final class BrowserModel {
                 BrowserModel.scan(folder, showHidden: showHidden)
             }.value
             guard let self, !Task.isCancelled, self.folder == folder else { return }
-            self.apply(result, select: select, viewing: viewing, fallbackIndex: fallbackIndex)
+            self.apply(result, select: select, viewing: viewing, fallbackIndex: fallbackIndex, alsoSelect: alsoSelect)
         }
     }
 
@@ -311,7 +325,9 @@ final class BrowserModel {
         }
     }
 
-    private func apply(_ result: Result<[FileItem], Error>, select: URL?, viewing: URL?, fallbackIndex: Int?) {
+    private func apply(
+        _ result: Result<[FileItem], Error>, select: URL?, viewing: URL?, fallbackIndex: Int?, alsoSelect: [URL]
+    ) {
         isLoadingFolder = false
         switch result {
         case .success(let items):
@@ -326,12 +342,19 @@ final class BrowserModel {
         }
 
         let items = gridItems
-        if let select, let match = items.first(where: { $0.url.path == select.path }) {
+        if let select, let match = items.first(where: { $0.url.path == select.path }), match.url != selection {
             selection = match.url
         } else if let current = selection, items.contains(where: { $0.url == current }) {
-            // keep the current selection
+            // Keep the current selection (e.g. a folder refresh), dropping anything that vanished.
+            let present = Set(items.map(\.url))
+            selectedURLs.formIntersection(present)
+            if selectedURLs.isEmpty { selectedURLs = [current] }
         } else {
             selection = images.first?.url ?? folders.first?.url
+        }
+        if !alsoSelect.isEmpty {
+            let paths = Set(alsoSelect.map(\.path))
+            selectedURLs.formUnion(items.filter { paths.contains($0.url.path) }.map(\.url))
         }
 
         if let viewing {
@@ -390,6 +413,34 @@ final class BrowserModel {
             return
         }
         selection = items[target].url
+    }
+
+    /// Plain click selects one, ⌘ toggles, ⇧ adds the range from the focused item.
+    func click(_ item: FileItem, modifiers: NSEvent.ModifierFlags) {
+        let items = gridItems
+        if modifiers.contains(.shift),
+           let anchor = selection,
+           let from = items.firstIndex(where: { $0.url == anchor }),
+           let to = items.firstIndex(where: { $0.url == item.url }) {
+            // Additive, so ⌘-picked images elsewhere aren't lost when you ⇧-click a range.
+            selectedURLs.formUnion(items[min(from, to)...max(from, to)].map(\.url))
+        } else if modifiers.contains(.command) {
+            isAdjustingSelection = true
+            defer { isAdjustingSelection = false }
+            if selectedURLs.contains(item.url) {
+                selectedURLs.remove(item.url)
+            } else {
+                selectedURLs.insert(item.url)
+            }
+            selection = item.url
+        } else {
+            selection = item.url
+        }
+    }
+
+    func selectAll() {
+        guard !isViewing else { return }
+        selectedURLs = Set(gridItems.map(\.url))
     }
 
     func activate(_ item: FileItem) {
@@ -508,64 +559,119 @@ final class BrowserModel {
 
     // MARK: File actions
 
+    /// What "Move to Trash" would delete: the open image in the viewer; in the grid, every
+    /// selected image — or, from a context menu, the clicked item (plus the rest of the
+    /// selection if it was part of it, like Finder).
+    func trashTargets(for item: FileItem? = nil) -> [FileItem] {
+        if isViewing {
+            return (item ?? currentItem).map { [$0] } ?? []
+        }
+        if let item, !selectedURLs.contains(item.url) {
+            return item.isDirectory ? [] : [item]
+        }
+        return selectedImages
+    }
+
     func moveToTrash(_ item: FileItem? = nil) {
-        guard let item = item ?? actionImage, !item.isDirectory else { return }
-        do {
-            var resulting: NSURL?
-            try FileManager.default.trashItem(at: item.url, resultingItemURL: &resulting)
-            ImageLoader.shared.invalidate(item.url)
-            removeFromList(item)
-            if let trashed = resulting as URL? {
-                undoManager?.registerUndo(withTarget: self) { model in
-                    MainActor.assumeIsolated { model.restore(item.url, from: trashed) }
+        trash(trashTargets(for: item))
+    }
+
+    private func trash(_ items: [FileItem]) {
+        guard !items.isEmpty else { return }
+        var moved: [(original: URL, trashed: URL)] = []
+        var removed: Set<URL> = []
+        var failures: [String] = []
+        for item in items {
+            do {
+                var resulting: NSURL?
+                try FileManager.default.trashItem(at: item.url, resultingItemURL: &resulting)
+                ImageLoader.shared.invalidate(item.url)
+                removed.insert(item.url)
+                if let trashed = resulting as URL? {
+                    moved.append((item.url, trashed))
                 }
-                undoManager?.setActionName("Move to Trash")
+            } catch {
+                failures.append("“\(item.name)”: \(error.localizedDescription)")
             }
-            showToast("Moved “\(item.name)” to the Trash", canUndo: resulting != nil)
-        } catch {
-            errorMessage = "Couldn't move “\(item.name)” to the Trash.\n\(error.localizedDescription)"
+        }
+        removeFromList(removed)
+
+        if !moved.isEmpty {
+            undoManager?.registerUndo(withTarget: self) { model in
+                MainActor.assumeIsolated { model.restore(moved) }
+            }
+            undoManager?.setActionName(moved.count == 1 ? "Move to Trash" : "Move \(moved.count) Items to Trash")
+        }
+        if removed.count == 1, let name = items.first(where: { removed.contains($0.url) })?.name {
+            showToast("Moved “\(name)” to the Trash", canUndo: !moved.isEmpty)
+        } else if removed.count > 1 {
+            showToast("Moved \(removed.count) images to the Trash", canUndo: !moved.isEmpty)
+        }
+        if !failures.isEmpty {
+            errorMessage = "Couldn't move \(failures.count) item\(failures.count == 1 ? "" : "s") to the Trash.\n"
+                + failures.joined(separator: "\n")
         }
     }
 
-    private func removeFromList(_ item: FileItem) {
-        let gridIndex = gridItems.firstIndex { $0.url == item.url }
-        guard let index = images.firstIndex(where: { $0.url == item.url }) else { return }
-        images.remove(at: index)
+    private func removeFromList(_ urls: Set<URL>) {
+        guard !urls.isEmpty else { return }
+        let firstGridIndex = gridItems.firstIndex { urls.contains($0.url) }
+        let viewedIndex = displayedURL.flatMap { url in images.firstIndex { $0.url == url } }
+        let removingViewed = displayedURL.map(urls.contains) ?? false
+        images.removeAll { urls.contains($0.url) }
 
-        if displayedURL == item.url {
+        if removingViewed, let viewedIndex {
             displayedURL = nil
             if images.isEmpty {
                 closeViewer()
             } else {
-                openImage(at: min(index, images.count - 1))
+                openImage(at: min(viewedIndex, images.count - 1))
             }
         } else if isViewing, let url = displayedURL {
             viewerIndex = images.firstIndex { $0.url == url }
-        } else if selection == item.url {
-            let items = gridItems
-            if let gridIndex, !items.isEmpty {
-                selection = items[min(gridIndex, items.count - 1)].url
-            } else {
-                selection = nil
+        } else {
+            // Select whatever now sits where the first deleted item was.
+            selectedURLs.subtract(urls)
+            if selectedURLs.isEmpty || selection.map(urls.contains) == true {
+                let items = gridItems
+                if let firstGridIndex, !items.isEmpty {
+                    selection = items[min(firstGridIndex, items.count - 1)].url
+                } else {
+                    selection = nil
+                }
             }
         }
     }
 
-    private func restore(_ original: URL, from trashed: URL) {
-        do {
-            try FileManager.default.moveItem(at: trashed, to: original)
+    private func restore(_ entries: [(original: URL, trashed: URL)]) {
+        var restored: [URL] = []
+        var failures: [String] = []
+        for entry in entries {
+            do {
+                try FileManager.default.moveItem(at: entry.trashed, to: entry.original)
+                restored.append(entry.original)
+            } catch {
+                failures.append("“\(entry.original.lastPathComponent)”: \(error.localizedDescription)")
+            }
+        }
+        if !restored.isEmpty {
+            // Redo trashes them again.
             undoManager?.registerUndo(withTarget: self) { model in
-                MainActor.assumeIsolated {
-                    if let item = FileItem(url: original) { model.moveToTrash(item) }
-                }
+                MainActor.assumeIsolated { model.trash(restored.compactMap(FileItem.init(url:))) }
             }
-            undoManager?.setActionName("Move to Trash")
-            if folder?.path == original.deletingLastPathComponent().path {
-                load(select: original, viewing: isViewing ? original : nil)
+            undoManager?.setActionName(restored.count == 1 ? "Move to Trash" : "Move \(restored.count) Items to Trash")
+            let here = restored.filter { $0.deletingLastPathComponent().path == folder?.path }
+            if let first = here.first {
+                load(select: first, viewing: isViewing ? first : nil, alsoSelect: isViewing ? [] : here)
             }
-            showToast("Restored “\(original.lastPathComponent)”", canUndo: false)
-        } catch {
-            errorMessage = "Couldn't restore “\(original.lastPathComponent)”.\n\(error.localizedDescription)"
+            showToast(
+                restored.count == 1 ? "Restored “\(restored[0].lastPathComponent)”" : "Restored \(restored.count) images",
+                canUndo: false
+            )
+        }
+        if !failures.isEmpty {
+            errorMessage = "Couldn't restore \(failures.count) item\(failures.count == 1 ? "" : "s").\n"
+                + failures.joined(separator: "\n")
         }
     }
 
@@ -686,6 +792,10 @@ final class BrowserModel {
         let modifiers = event.modifierFlags
             .intersection(.deviceIndependentFlagsMask)
             .subtracting([.numericPad, .function, .capsLock])
+        if modifiers == .command, event.charactersIgnoringModifiers == "a", !isViewing {
+            selectAll()
+            return true
+        }
         guard modifiers.isEmpty else { return false }
 
         switch event.keyCode {
@@ -698,8 +808,13 @@ final class BrowserModel {
             openSelection()
         case 49: toggleViewer() // space
         case 53: // escape
-            guard isViewing else { return false }
-            closeViewer()
+            if isViewing {
+                closeViewer()
+            } else if selectedURLs.count > 1 {
+                selectedURLs = selection.map { [$0] } ?? [] // collapse to the focused item
+            } else {
+                return false
+            }
         case 115: showFirst() // home
         case 119: showLast() // end
         default:

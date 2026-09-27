@@ -24,6 +24,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         BrowserModel.shared.open(url)
     }
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Always light, regardless of the system's Dark Mode setting.
+        NSApp.appearance = NSAppearance(named: .aqua)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Open-file events are delivered before this, so they take precedence over the default folder.
         DispatchQueue.main.async {

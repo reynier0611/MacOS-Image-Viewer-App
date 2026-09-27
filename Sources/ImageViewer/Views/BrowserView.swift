@@ -56,10 +56,12 @@ struct ThumbnailGrid: View {
                         spacing: 16
                     ) {
                         ForEach(model.gridItems) { item in
-                            GridCell(item: item, size: size, isSelected: model.selection == item.url)
+                            GridCell(item: item, size: size, isSelected: model.selectedURLs.contains(item.url))
                                 .id(item.url)
                                 .onTapGesture(count: 2) { model.activate(item) }
-                                .simultaneousGesture(TapGesture().onEnded { model.selection = item.url })
+                                .simultaneousGesture(TapGesture().onEnded {
+                                    model.click(item, modifiers: NSEvent.modifierFlags)
+                                })
                                 .contextMenu { ItemContextMenu(item: item) }
                         }
                     }
@@ -190,7 +192,13 @@ struct ItemContextMenu: View {
         if !item.isDirectory {
             Divider()
             Button("Rename…") { model.beginRename(item) }
-            Button("Move to Trash", role: .destructive) { model.moveToTrash(item) }
+        }
+        let trashCount = model.trashTargets(for: item).count
+        if trashCount > 0 {
+            if item.isDirectory { Divider() }
+            Button(trashCount == 1 ? "Move to Trash" : "Move \(trashCount) Images to Trash", role: .destructive) {
+                model.moveToTrash(item)
+            }
         }
     }
 }

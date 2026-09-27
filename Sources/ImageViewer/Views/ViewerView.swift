@@ -7,7 +7,7 @@ struct ViewerView: View {
     var body: some View {
         VStack(spacing: 0) {
             ZStack {
-                Color(white: 0.08)
+                Color(white: 0.94)
                 ZoomableImageView(
                     image: model.currentImage,
                     imageURL: model.displayedURL,
@@ -33,7 +33,6 @@ struct ViewerView: View {
             }
             .overlay(alignment: .bottomLeading) { infoPill }
             .onHover { isHovering = $0 }
-            .environment(\.colorScheme, .dark)
 
             if model.showFilmstrip && model.images.count > 1 {
                 FilmstripView()
@@ -105,7 +104,8 @@ struct FilmstripView: View {
             }
             .scrollIndicators(.hidden)
             .frame(height: 84)
-            .background(Color(white: 0.13))
+            .background(Color(white: 0.985))
+            .overlay(alignment: .top) { Divider() }
             .onChange(of: model.viewerIndex, initial: true) {
                 guard let url = model.currentItem?.url else { return }
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(url, anchor: .center) }

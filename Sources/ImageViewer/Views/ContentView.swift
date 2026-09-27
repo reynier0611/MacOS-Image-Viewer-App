@@ -68,6 +68,9 @@ struct ContentView: View {
         if !model.folders.isEmpty {
             parts.append("\(model.folders.count) folder\(model.folders.count == 1 ? "" : "s")")
         }
+        if model.selectedURLs.count > 1 {
+            parts.append("\(model.selectedURLs.count) selected")
+        }
         return parts.joined(separator: ", ")
     }
 
@@ -193,6 +196,11 @@ struct MainToolbar: ToolbarContent {
                     Label("Open", systemImage: "folder")
                 }
                 .help("Open a folder or image (⌘O)")
+                Button(role: .destructive) { model.moveToTrash() } label: {
+                    Label("Move to Trash", systemImage: "trash")
+                }
+                .disabled(model.selectedImages.isEmpty)
+                .help("Move selected images to Trash (⌘⌫). ⌘-click or ⇧-click to select several.")
             }
             Toggle(isOn: $model.showInspector) {
                 Label("Inspector", systemImage: "info.circle")
