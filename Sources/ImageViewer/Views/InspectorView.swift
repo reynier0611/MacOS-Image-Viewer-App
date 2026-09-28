@@ -19,10 +19,6 @@ struct InspectorView: View {
                             Label("\(model.selectedURLs.count) items selected", systemImage: "checkmark.circle")
                                 .font(.headline)
                         }
-                        if !model.isViewing && !item.isDirectory {
-                            ThumbnailView(item: item, size: 200)
-                                .frame(maxWidth: .infinity)
-                        }
                         if !item.isDirectory && !item.isVideo {
                             section("Histogram") {
                                 if let histogram {

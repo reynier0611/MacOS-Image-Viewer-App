@@ -81,6 +81,7 @@ struct ViewerView: View {
                 enlargeSmallImages: model.enlargeSmallImages,
                 textLines: model.isTextRecognitionOn ? model.recognizedLines : [],
                 selectedLines: model.selectedLineIDs,
+                showsExtractedText: model.showsExtractedText,
                 onTextSelectionChange: { model.selectedLineIDs = $0 },
                 onCopyText: { model.copyRecognizedText() }
             ) { model.zoomPercent = $0 }
@@ -215,6 +216,13 @@ struct TextRecognitionBar: View {
                 Button("Copy All") { model.copyRecognizedText(all: true) }
                 Button("Select All") { model.selectAllRecognizedText() }
                     .help("Select every line (⌘A)")
+                Divider().frame(height: 16)
+                Button {
+                    model.showsExtractedText.toggle()
+                } label: {
+                    Image(systemName: model.showsExtractedText ? "eye" : "eye.slash")
+                }
+                .help(model.showsExtractedText ? "Peek at the original image under the text" : "Show the extracted text")
             }
             Button {
                 model.isTextRecognitionOn = false

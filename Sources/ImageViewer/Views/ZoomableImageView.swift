@@ -10,6 +10,7 @@ struct ZoomableImageView: NSViewRepresentable {
     let enlargeSmallImages: Bool
     var textLines: [RecognizedLine] = []
     var selectedLines: Set<Int> = []
+    var showsExtractedText = true
     var onTextSelectionChange: (Set<Int>) -> Void = { _ in }
     var onCopyText: () -> Void = {}
     let onZoomChange: (Int) -> Void
@@ -71,6 +72,7 @@ struct ZoomableImageView: NSViewRepresentable {
             overlay.onCopy = onCopyText
             if overlay.lines != textLines { overlay.lines = textLines }
             if overlay.selected != selectedLines { overlay.selected = selectedLines }
+            if overlay.showsExtractedText != showsExtractedText { overlay.showsExtractedText = showsExtractedText }
         }
     }
 
@@ -208,6 +210,11 @@ final class TextOverlayView: NSView, NSMenuItemValidation {
     var selected: Set<Int> = [] {
         didSet { needsDisplay = true }
     }
+    /// When true, each line's box is filled and the recognized text is printed over it in red.
+    /// When false, only outlines are drawn so the original photo shows through.
+    var showsExtractedText = true {
+        didSet { needsDisplay = true }
+    }
     var onSelectionChange: (Set<Int>) -> Void = { _ in }
     var onCopy: () -> Void = {}
 
@@ -247,18 +254,25 @@ final class TextOverlayView: NSView, NSMenuItemValidation {
         bounds.fill()
         let width = 1.5 / magnification
         for line in lines {
+            let isSelected = selected.contains(line.id)
             let path = outline(line)
-            path.lineWidth = width
+            path.lineWidth = isSelected ? width * 2 : width
             path.lineJoinStyle = .round
-            if selected.contains(line.id) {
-                NSColor.controlAccentColor.withAlphaComponent(0.4).setFill()
-                NSColor.controlAccentColor.setStroke()
+            if showsExtractedText {
+                // Opaque, so the red text isn't muddled by the photo's own lettering underneath.
+                (isSelected
+                    ? NSColor.controlAccentColor.blended(withFraction: 0.7, of: .white) ?? .white
+                    : NSColor(calibratedRed: 1, green: 0.98, blue: 0.86, alpha: 1)
+                ).setFill()
             } else {
-                NSColor.systemYellow.withAlphaComponent(0.22).setFill()
-                NSColor.systemYellow.withAlphaComponent(0.95).setStroke()
+                (isSelected ? NSColor.controlAccentColor.withAlphaComponent(0.35) : NSColor.systemYellow.withAlphaComponent(0.18)).setFill()
             }
+            (isSelected ? NSColor.controlAccentColor : NSColor.systemYellow.withAlphaComponent(0.95)).setStroke()
             path.fill()
             path.stroke()
+            if showsExtractedText {
+                drawText(of: line)
+            }
         }
         if let band {
             let path = NSBezierPath(rect: band)
@@ -269,6 +283,40 @@ final class TextOverlayView: NSView, NSMenuItemValidation {
             path.fill()
             path.stroke()
         }
+    }
+
+    /// Prints the recognized text inside its box: sized to the box height, shrunk to fit the
+    /// width, and rotated to follow the line's baseline so slanted text lines up.
+    private func drawText(of line: RecognizedLine) {
+        let size = bounds.size
+        let corners = line.corners.map { NSPoint(x: $0.x * size.width, y: $0.y * size.height) }
+        let (topLeft, topRight, bottomLeft) = (corners[0], corners[1], corners[3])
+        let boxWidth = hypot(topRight.x - topLeft.x, topRight.y - topLeft.y)
+        let boxHeight = hypot(topLeft.x - bottomLeft.x, topLeft.y - bottomLeft.y)
+        guard boxWidth > 1, boxHeight > 1 else { return }
+
+        var fontSize = boxHeight * 0.9
+        func attributed(_ size: CGFloat) -> NSAttributedString {
+            NSAttributedString(string: line.text, attributes: [
+                .font: NSFont.systemFont(ofSize: size, weight: .semibold),
+                .foregroundColor: NSColor.systemRed,
+            ])
+        }
+        var text = attributed(fontSize)
+        let measured = text.size()
+        if measured.width > boxWidth * 0.96 {
+            fontSize *= boxWidth * 0.96 / measured.width
+            text = attributed(fontSize)
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        let transform = NSAffineTransform()
+        transform.translateX(by: bottomLeft.x, yBy: bottomLeft.y)
+        transform.rotate(byRadians: atan2(topRight.y - topLeft.y, topRight.x - topLeft.x))
+        transform.concat()
+        let textSize = text.size()
+        text.draw(at: NSPoint(x: (boxWidth - textSize.width) / 2, y: (boxHeight - textSize.height) / 2))
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     /// Only text is clickable; everywhere else, clicks fall through to the image (panning, double-click zoom).

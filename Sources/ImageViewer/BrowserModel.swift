@@ -138,6 +138,8 @@ final class BrowserModel {
     private(set) var recognizedLines: [RecognizedLine] = []
     private(set) var isRecognizingText = false
     var selectedLineIDs: Set<Int> = []
+    /// Print the extracted text over the image (on), or just outline it to see the original (off).
+    var showsExtractedText = true
 
     // MARK: Search & filters
 
