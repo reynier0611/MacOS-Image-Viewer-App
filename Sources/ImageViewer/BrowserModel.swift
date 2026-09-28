@@ -12,6 +12,17 @@ struct ZoomRequest: Equatable {
     let id = UUID()
 }
 
+struct MoveDestination: Identifiable {
+    let title: String
+    let url: URL
+    var id: String { url.path }
+}
+
+extension UTType {
+    /// Drag payload for images dragged within the app (the actual URLs live in `BrowserModel.draggedItems`).
+    static let imageViewerSelection = UTType(exportedAs: "local.imageviewer.selection")
+}
+
 struct Toast: Identifiable, Equatable {
     let id = UUID()
     let message: String
@@ -43,6 +54,7 @@ final class BrowserModel {
     private(set) var backStack: [URL] = []
     private(set) var forwardStack: [URL] = []
     private(set) var recentFolders: [URL] = []
+    private(set) var recentMoveDestinations: [URL] = []
 
     // MARK: Viewer
 
@@ -63,6 +75,9 @@ final class BrowserModel {
     var isRenamePresented = false
     var renameText = ""
     var isGoToFolderPresented = false
+    var isNewFolderPresented = false
+    var newFolderName = ""
+    private(set) var newFolderItemCount = 0
     var goToFolderText = ""
 
     // MARK: Preferences
@@ -101,6 +116,9 @@ final class BrowserModel {
     @ObservationIgnored private var didStart = false
     @ObservationIgnored private var hasExplicitOpen = false
     @ObservationIgnored private var isAdjustingSelection = false
+    @ObservationIgnored private var pendingNewFolderItems: [FileItem] = []
+    /// Images being dragged inside the app, set when a drag starts.
+    @ObservationIgnored private(set) var draggedItems: [FileItem] = []
 
     private enum Keys {
         static let sortKey = "sortKey"
@@ -112,6 +130,7 @@ final class BrowserModel {
         static let enlargeSmallImages = "enlargeSmallImages"
         static let lastFolder = "lastFolder"
         static let recentFolders = "recentFolders"
+        static let recentMoveDestinations = "recentMoveDestinations"
     }
 
     private init() {
@@ -124,6 +143,8 @@ final class BrowserModel {
         showHidden = d.bool(forKey: Keys.showHidden)
         enlargeSmallImages = d.object(forKey: Keys.enlargeSmallImages) as? Bool ?? true
         recentFolders = (d.stringArray(forKey: Keys.recentFolders) ?? [])
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+        recentMoveDestinations = (d.stringArray(forKey: Keys.recentMoveDestinations) ?? [])
             .map { URL(fileURLWithPath: $0, isDirectory: true) }
     }
 
@@ -438,6 +459,18 @@ final class BrowserModel {
         }
     }
 
+    /// Used by the drag-selection rectangle.
+    func setSelection(_ urls: Set<URL>, focus: URL?) {
+        isAdjustingSelection = true
+        defer { isAdjustingSelection = false }
+        selection = focus ?? urls.first
+        selectedURLs = urls
+    }
+
+    func clearSelection() {
+        selection = nil
+    }
+
     func selectAll() {
         guard !isViewing else { return }
         selectedURLs = Set(gridItems.map(\.url))
@@ -559,10 +592,10 @@ final class BrowserModel {
 
     // MARK: File actions
 
-    /// What "Move to Trash" would delete: the open image in the viewer; in the grid, every
+    /// What Move to Trash / Move to Folder act on: the open image in the viewer; in the grid, every
     /// selected image — or, from a context menu, the clicked item (plus the rest of the
     /// selection if it was part of it, like Finder).
-    func trashTargets(for item: FileItem? = nil) -> [FileItem] {
+    func fileActionTargets(for item: FileItem? = nil) -> [FileItem] {
         if isViewing {
             return (item ?? currentItem).map { [$0] } ?? []
         }
@@ -573,7 +606,7 @@ final class BrowserModel {
     }
 
     func moveToTrash(_ item: FileItem? = nil) {
-        trash(trashTargets(for: item))
+        trash(fileActionTargets(for: item))
     }
 
     private func trash(_ items: [FileItem]) {
@@ -673,6 +706,210 @@ final class BrowserModel {
             errorMessage = "Couldn't restore \(failures.count) item\(failures.count == 1 ? "" : "s").\n"
                 + failures.joined(separator: "\n")
         }
+    }
+
+    // MARK: Moving
+
+    /// Subfolders here, the parent folder, and recently used destinations, for the "Move to" menus.
+    var moveDestinationGroups: [(title: String, destinations: [MoveDestination])] {
+        var seen: Set<String> = [folder?.path ?? ""]
+        func unique(_ urls: [URL]) -> [MoveDestination] {
+            urls.compactMap { url in
+                guard seen.insert(url.path).inserted else { return nil }
+                return MoveDestination(title: FileManager.default.displayName(atPath: url.path), url: url)
+            }
+        }
+        var groups: [(String, [MoveDestination])] = []
+        let here = unique(folders.prefix(30).map(\.url))
+        if !here.isEmpty { groups.append(("Folders Here", here)) }
+        if canGoUp, let folder {
+            groups.append(("Enclosing Folder", unique([folder.deletingLastPathComponent()])))
+        }
+        let recent = unique(recentMoveDestinations.filter { FileManager.default.fileExists(atPath: $0.path) })
+        if !recent.isEmpty { groups.append(("Recent", recent)) }
+        return groups
+    }
+
+    func showMovePanel(for item: FileItem? = nil) {
+        let items = fileActionTargets(for: item)
+        guard !items.isEmpty else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = recentMoveDestinations.first ?? folder
+        panel.prompt = "Move"
+        panel.message = items.count == 1 ? "Move “\(items[0].name)” to:" : "Move \(items.count) images to:"
+        if panel.runModal() == .OK, let url = panel.url {
+            move(items, to: url)
+        }
+    }
+
+    /// Moves images into `destination`. Never overwrites: a name clash becomes “name 2.jpg”.
+    func move(_ items: [FileItem], to destination: URL) {
+        let destination = URL(fileURLWithPath: Self.canonicalPath(destination), isDirectory: true)
+        let items = items.filter { !$0.isDirectory && $0.url.deletingLastPathComponent().path != destination.path }
+        guard !items.isEmpty else { return }
+        var planned: [(from: URL, to: URL)] = []
+        for item in items {
+            planned.append((item.url, uniqueDestination(for: item.name, in: destination, excluding: planned.map(\.to))))
+        }
+        let done = applyMoves(planned)
+        guard !done.isEmpty else { return }
+
+        rememberMoveDestination(destination)
+        let name = FileManager.default.displayName(atPath: destination.path)
+        let renamed = done.filter { $0.from.lastPathComponent != $0.to.lastPathComponent }.count
+        var message = done.count == 1 ? "Moved “\(done[0].to.lastPathComponent)” to “\(name)”" : "Moved \(done.count) images to “\(name)”"
+        if renamed > 0 { message += " (\(renamed) renamed to avoid overwriting)" }
+        showToast(message, canUndo: true)
+    }
+
+    /// Performs file moves, updates the listing, and registers the inverse for Undo/Redo.
+    @discardableResult
+    private func applyMoves(_ moves: [(from: URL, to: URL)]) -> [(from: URL, to: URL)] {
+        var done: [(from: URL, to: URL)] = []
+        var failures: [String] = []
+        for move in moves {
+            do {
+                guard !FileManager.default.fileExists(atPath: move.to.path) else {
+                    throw CocoaError(.fileWriteFileExists)
+                }
+                try FileManager.default.moveItem(at: move.from, to: move.to)
+                ImageLoader.shared.invalidate(move.from)
+                done.append(move)
+            } catch {
+                failures.append("“\(move.from.lastPathComponent)”: \(error.localizedDescription)")
+            }
+        }
+
+        let here = folder?.path
+        let leaving = Set(done.filter { $0.from.deletingLastPathComponent().path == here }.map(\.from))
+        let arriving = done.filter { $0.to.deletingLastPathComponent().path == here }.map(\.to)
+        removeFromList(leaving)
+        if let first = arriving.first {
+            if isViewing {
+                load(select: displayedURL, viewing: displayedURL, fallbackIndex: viewerIndex)
+            } else {
+                load(select: first, viewing: nil, alsoSelect: arriving)
+            }
+        }
+
+        if !done.isEmpty {
+            let inverse = done.reversed().map { (from: $0.to, to: $0.from) }
+            undoManager?.registerUndo(withTarget: self) { model in
+                MainActor.assumeIsolated { _ = model.applyMoves(inverse) }
+            }
+            undoManager?.setActionName(done.count == 1 ? "Move" : "Move \(done.count) Images")
+        }
+        if !failures.isEmpty {
+            errorMessage = "Couldn't move \(failures.count) item\(failures.count == 1 ? "" : "s").\n"
+                + failures.joined(separator: "\n")
+        }
+        return done
+    }
+
+    private func uniqueDestination(for name: String, in directory: URL, excluding taken: [URL]) -> URL {
+        let base = (name as NSString).deletingPathExtension
+        let ext = (name as NSString).pathExtension
+        var candidate = directory.appendingPathComponent(name)
+        var counter = 2
+        while FileManager.default.fileExists(atPath: candidate.path) || taken.contains(where: { $0.path == candidate.path }) {
+            candidate = directory.appendingPathComponent(ext.isEmpty ? "\(base) \(counter)" : "\(base) \(counter).\(ext)")
+            counter += 1
+        }
+        return candidate
+    }
+
+    private func rememberMoveDestination(_ url: URL) {
+        recentMoveDestinations.removeAll { $0.path == url.path }
+        recentMoveDestinations.insert(url, at: 0)
+        recentMoveDestinations = Array(recentMoveDestinations.prefix(8))
+        defaults.set(recentMoveDestinations.map(\.path), forKey: Keys.recentMoveDestinations)
+    }
+
+    // MARK: Drag and drop
+
+    /// Called when a drag starts on an image: drags the whole selection if the image is part of it.
+    func beginDrag(_ item: FileItem) {
+        if !selectedURLs.contains(item.url) {
+            selection = item.url
+        }
+        draggedItems = selectedImages.isEmpty ? [item] : selectedImages
+    }
+
+    func canDrop(onto destination: URL) -> Bool {
+        !draggedItems.isEmpty
+            && destination.path != folder?.path
+            && draggedItems.contains { $0.url.deletingLastPathComponent().path != destination.path }
+    }
+
+    @discardableResult
+    func dropDragged(onto destination: URL) -> Bool {
+        guard canDrop(onto: destination) else { return false }
+        let items = draggedItems
+        draggedItems = []
+        move(items, to: destination)
+        return true
+    }
+
+    // MARK: New folder with selection
+
+    func beginNewFolderWithSelection(_ item: FileItem? = nil) {
+        let items = fileActionTargets(for: item)
+        guard !items.isEmpty, folder != nil else { return }
+        pendingNewFolderItems = items
+        newFolderItemCount = items.count
+        newFolderName = "New Folder"
+        isNewFolderPresented = true
+    }
+
+    func commitNewFolder() {
+        let items = pendingNewFolderItems
+        pendingNewFolderItems = []
+        guard let folder, !items.isEmpty else { return }
+        let name = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, !name.contains("/"), !name.hasPrefix(".") else {
+            errorMessage = "“\(name)” isn't a valid folder name."
+            return
+        }
+        let url = folder.appendingPathComponent(name, isDirectory: true)
+        guard !FileManager.default.fileExists(atPath: url.path) else {
+            errorMessage = "An item named “\(name)” already exists here."
+            return
+        }
+        do {
+            try createFolder(url)
+        } catch {
+            errorMessage = "Couldn't create “\(name)”.\n\(error.localizedDescription)"
+            return
+        }
+        // One undo step (same event): moves the images back, then removes the empty folder.
+        move(items, to: url)
+        load(select: url, viewing: nil)
+    }
+
+    private func createFolder(_ url: URL) throws {
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+        undoManager?.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated { model.removeFolderIfEmpty(url) }
+        }
+    }
+
+    private func removeFolderIfEmpty(_ url: URL) {
+        let contents = (try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []
+        guard contents.allSatisfy({ $0 == ".DS_Store" }) else { return }
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            return
+        }
+        undoManager?.registerUndo(withTarget: self) { model in
+            MainActor.assumeIsolated { try? model.createFolder(url) }
+        }
+        // Not reload(): that would cancel a pending refresh that reselects the images just moved back.
+        folders.removeAll { $0.url.path == url.path }
     }
 
     func beginRename(_ item: FileItem? = nil) {

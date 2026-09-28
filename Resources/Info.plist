@@ -53,6 +53,19 @@
             </array>
         </dict>
     </array>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>local.imageviewer.selection</string>
+            <key>UTTypeDescription</key>
+            <string>Image Viewer Selection</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+        </dict>
+    </array>
     <key>NSDesktopFolderUsageDescription</key>
     <string>Image Viewer shows the images in folders you browse.</string>
     <key>NSDocumentsFolderUsageDescription</key>

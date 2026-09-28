@@ -33,6 +33,13 @@ struct ContentView: View {
         } message: {
             Text("The file extension is kept.")
         }
+        .alert("New Folder with Selection", isPresented: $model.isNewFolderPresented) {
+            TextField("Folder name", text: $model.newFolderName)
+            Button("Create") { model.commitNewFolder() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Creates a folder here and moves \(model.newFolderItemCount == 1 ? "the image" : "the \(model.newFolderItemCount) images") into it.")
+        }
         .alert("Go to Folder", isPresented: $model.isGoToFolderPresented) {
             TextField("Path", text: $model.goToFolderText)
             Button("Go") { model.goToFolder(path: model.goToFolderText) }
@@ -196,6 +203,13 @@ struct MainToolbar: ToolbarContent {
                     Label("Open", systemImage: "folder")
                 }
                 .help("Open a folder or image (⌘O)")
+                Menu {
+                    MoveToMenuItems()
+                } label: {
+                    Label("Move to Folder", systemImage: "arrowshape.turn.up.right")
+                }
+                .disabled(model.selectedImages.isEmpty)
+                .help("Move selected images to another folder (⇧⌘M). You can also drag them onto a folder.")
                 Button(role: .destructive) { model.moveToTrash() } label: {
                     Label("Move to Trash", systemImage: "trash")
                 }

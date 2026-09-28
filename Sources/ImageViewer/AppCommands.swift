@@ -19,6 +19,10 @@ struct AppCommands: Commands {
             Button("Reveal in Finder") { model.revealInFinder() }
                 .keyboardShortcut("r")
             Divider()
+            Button("Move to Folder…") { model.showMovePanel() }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+            Button("New Folder with Selection…") { model.beginNewFolderWithSelection() }
+                .keyboardShortcut("n", modifiers: [.command, .control])
             Button("Rename…") { model.beginRename() }
             Button("Move to Trash") { model.moveToTrash() }
                 .keyboardShortcut(.delete)

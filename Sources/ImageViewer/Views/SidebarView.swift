@@ -39,6 +39,7 @@ struct SidebarView: View {
             Section("Favorites") {
                 ForEach(Self.favorites) { favorite in
                     Label(favorite.title, systemImage: favorite.symbol)
+                        .folderDropTarget(favorite.url)
                         .tag(favorite.url.path)
                 }
             }
@@ -46,6 +47,7 @@ struct SidebarView: View {
                 Section("Locations") {
                     ForEach(volumes, id: \.self) { volume in
                         Label(volumeName(volume), systemImage: volume.path == "/" ? "internaldrive" : "externaldrive")
+                            .folderDropTarget(volume)
                             .tag(volume.path)
                     }
                 }
@@ -56,6 +58,7 @@ struct SidebarView: View {
                 Section("Recent") {
                     ForEach(Array(recents), id: \.self) { url in
                         Label(FileManager.default.displayName(atPath: url.path), systemImage: "folder")
+                            .folderDropTarget(url)
                             .help(url.path)
                             .tag(url.path)
                     }

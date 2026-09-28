@@ -6,7 +6,9 @@ A native macOS image viewer and browser (SwiftUI, macOS 14 Sonoma or later, Appl
 - Open an image to see it as large as the window allows. Use ← → to go through the folder, and Esc to go back to the grid.
 - Zoom (pinch, ⌘= / ⌘-, double-click for 100%), drag to pan, full screen with **F**.
 - Filmstrip under the viewer, and an inspector (⌘I) with file info, dimensions, camera EXIF and GPS (with "Show in Maps").
-- Select several images in the grid (⌘-click, ⇧-click, ⌘A) and move them all to the Trash at once (⌘⌫). Undo (⌘Z) brings them all back. Also Rename, Copy Image, Copy Path, Reveal in Finder, Open in Preview, and Share/AirDrop.
+- Select several images in the grid by dragging a rectangle over them, ⌘-click, ⇧-click or ⌘A.
+- Move the selection to another folder: drag it onto a folder tile, a sidebar folder or a folder in the path bar. You can also right-click ▸ **Move to** (subfolders, the enclosing folder, recent destinations, or Choose Folder…) or use **New Folder with Selection** (⌃⌘N). A name clash never overwrites: the incoming file becomes “name 2.jpg”.
+- Move the selection to the Trash (⌘⌫). Undo (⌘Z) reverses any move or trash, including a whole batch. Also Rename, Copy Image, Copy Path, Reveal in Finder, Open in Preview, and Share/AirDrop.
 - Sort by name, date or size. Changes made to the folder outside the app show up automatically.
 - Open from Finder (right-click an image or folder, then **Open With ▸ Image Viewer**), drag onto the window or Dock icon, or use ⌘O.
 
@@ -42,6 +44,8 @@ The first time you browse Desktop, Documents, Downloads or an external drive, ma
 | In the grid | |
 |---|---|
 | ← → ↑ ↓ | Move selection |
+| Drag on empty space | Select with a rectangle (hold ⌘ to add) |
+| Click empty space | Deselect all |
 | ⌘-click | Add or remove an image from the selection |
 | ⇧-click | Add a range to the selection |
 | ⌘A | Select all |
@@ -68,6 +72,8 @@ The first time you browse Desktop, Documents, Downloads or an external drive, ma
 | ⌘I | Inspector (metadata) |
 | ⌥⌘F | Filmstrip |
 | ⌘⌫ | Move to Trash |
+| ⇧⌘M | Move to Folder… |
+| ⌃⌘N | New Folder with Selection… |
 | ⌘Z | Undo trash / rename |
 | ⇧⌘C / ⌥⌘C | Copy image / copy path |
 | ⌘R | Reveal in Finder |
