@@ -182,6 +182,10 @@ struct MainToolbar: ToolbarContent {
                         .help("Zoom in (⌘=)")
                 }
                 if model.currentItem?.isVideo == false {
+                    Toggle(isOn: Binding(get: { model.isTextRecognitionOn }, set: { model.isTextRecognitionOn = $0 })) {
+                        Label("Text", systemImage: "text.viewfinder")
+                    }
+                    .help("Find and select text in the image (⌘T)")
                     ControlGroup {
                         Button { model.changeOrientation(.rotateLeft) } label: { Label("Rotate Left", systemImage: "rotate.left") }
                             .help("Rotate left (⌘L)")

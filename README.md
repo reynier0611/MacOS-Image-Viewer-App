@@ -17,7 +17,8 @@ A native macOS image viewer and browser (SwiftUI, macOS 14 Sonoma or later, Appl
 - **Find Duplicates** (⌥⌘D) finds identical copies and visually similar photos (Strict / Normal / Loose), suggests the best copy, and moves the rest to the Trash after you review them.
 - **Batch Rename** (⇧⌘R) renames a selection with a pattern such as `{date}_{n}` (tokens: `{name} {n} {date} {time} {year} {month} {day}`), with a live preview. Undo reverses the whole batch.
 - **Export** (⌘E) saves copies as JPEG, HEIC, PNG or TIFF, optionally resized, keeping camera details and removing location by default. Originals are never changed.
-- The inspector can also show a **histogram** and a **map** of where photos were taken, for one photo or a whole selection. Both are off by default: turn them on with the buttons at the top of the inspector.
+- **Recognize Text** (⌘T, or the Text button in the viewer) runs macOS's on-device OCR, the engine behind Live Text, and highlights every line of text on the image. The highlights follow zoom and pan. Select lines with a click, ⌘-click, ⇧-click, a drag across them, or ⌘A; copy with ⌘C or the Copy / Copy All buttons. Double-click a line to copy just that line. Esc hides the text.
+- The inspector (ⓘ, ⌘I) shows a **histogram** for photos and a **map** of where they were taken when the file has a location (for one photo, or every selected photo). Both only appear while the inspector is open.
 - Open from Finder (right-click an image or folder, then **Open With ▸ Image Viewer**), drag onto the window or Dock icon, or use ⌘O.
 
 ## Build and install (this Mac)
@@ -85,6 +86,7 @@ The first time you browse Desktop, Documents, Downloads or an external drive, ma
 | ⌘Z | Undo trash / rename |
 | ⇧⌘C / ⌥⌘C | Copy image / copy path |
 | ⌥⌘R | Reveal in Finder |
+| ⌘T | Recognize text (select lines, ⌘C to copy) |
 | ⌘L / ⌘R | Rotate left / right |
 | ⇧⌘R | Batch rename… |
 | ⌘E | Export… |

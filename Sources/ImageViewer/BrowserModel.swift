@@ -125,6 +125,20 @@ final class BrowserModel {
     private(set) var zoomRequest: ZoomRequest?
     var zoomPercent: Int?
 
+    // MARK: Text recognition (OCR)
+
+    /// While on, every image opened in the viewer is scanned for text and the lines are highlighted.
+    var isTextRecognitionOn = false {
+        didSet {
+            guard isTextRecognitionOn != oldValue else { return }
+            selectedLineIDs = []
+            recognizeTextIfNeeded()
+        }
+    }
+    private(set) var recognizedLines: [RecognizedLine] = []
+    private(set) var isRecognizingText = false
+    var selectedLineIDs: Set<Int> = []
+
     // MARK: Search & filters
 
     var searchText = "" {
@@ -188,13 +202,7 @@ final class BrowserModel {
     var enlargeSmallImages: Bool {
         didSet { defaults.set(enlargeSmallImages, forKey: Keys.enlargeSmallImages) }
     }
-    /// Optional inspector sections, off by default.
-    var showHistogram: Bool {
-        didSet { defaults.set(showHistogram, forKey: Keys.showHistogram) }
-    }
-    var showMap: Bool {
-        didSet { defaults.set(showMap, forKey: Keys.showMap) }
-    }
+
 
     // MARK: Internals
 
@@ -206,6 +214,9 @@ final class BrowserModel {
     @ObservationIgnored private var loadTask: Task<Void, Never>?
     @ObservationIgnored private var imageTask: Task<Void, Never>?
     @ObservationIgnored private var indexTask: Task<Void, Never>?
+    @ObservationIgnored private var textTask: Task<Void, Never>?
+    @ObservationIgnored private var recognizedURL: URL?
+    @ObservationIgnored private var textCache: [URL: [RecognizedLine]] = [:]
     @ObservationIgnored private var analysisTask: Task<Void, Never>?
     @ObservationIgnored private var didStart = false
     @ObservationIgnored private var hasExplicitOpen = false
@@ -222,8 +233,6 @@ final class BrowserModel {
         static let showFilmstrip = "showFilmstrip"
         static let showHidden = "showHidden"
         static let enlargeSmallImages = "enlargeSmallImages"
-        static let showHistogram = "showHistogram"
-        static let showMap = "showMap"
         static let lastFolder = "lastFolder"
         static let recentFolders = "recentFolders"
         static let recentMoveDestinations = "recentMoveDestinations"
@@ -238,8 +247,6 @@ final class BrowserModel {
         showFilmstrip = d.object(forKey: Keys.showFilmstrip) as? Bool ?? true
         showHidden = d.bool(forKey: Keys.showHidden)
         enlargeSmallImages = d.object(forKey: Keys.enlargeSmallImages) as? Bool ?? true
-        showHistogram = d.bool(forKey: Keys.showHistogram)
-        showMap = d.bool(forKey: Keys.showMap)
         recentFolders = (d.stringArray(forKey: Keys.recentFolders) ?? [])
             .map { URL(fileURLWithPath: $0, isDirectory: true) }
         recentMoveDestinations = (d.stringArray(forKey: Keys.recentMoveDestinations) ?? [])
@@ -740,8 +747,10 @@ final class BrowserModel {
             let player = AVPlayer(url: item.url)
             videoPlayer = player
             player.play()
+            recognizeTextIfNeeded()
             return
         }
+        recognizeTextIfNeeded()
         if let full = ImageLoader.shared.cachedImage(for: item.url) {
             currentImage = full
             isLoadingImage = false
@@ -773,6 +782,7 @@ final class BrowserModel {
     }
 
     func closeViewer() {
+        isTextRecognitionOn = false
         imageTask?.cancel()
         videoPlayer?.pause()
         videoPlayer = nil
@@ -782,6 +792,68 @@ final class BrowserModel {
         isLoadingImage = false
         imageError = nil
         zoomPercent = nil
+    }
+
+    /// ⌘T: toggles text recognition, opening the selected image first when in the grid.
+    func toggleTextRecognition() {
+        if !isViewing {
+            openSelection()
+            guard isViewing else { return }
+            isTextRecognitionOn = true
+            return
+        }
+        isTextRecognitionOn.toggle()
+    }
+
+    private func recognizeTextIfNeeded() {
+        guard isTextRecognitionOn, let url = displayedURL, currentItem?.isVideo == false else {
+            textTask?.cancel()
+            recognizedLines = []
+            recognizedURL = nil
+            isRecognizingText = false
+            return
+        }
+        guard recognizedURL != url else { return }
+        selectedLineIDs = []
+        textTask?.cancel()
+        if let cached = textCache[url] {
+            recognizedLines = cached
+            recognizedURL = url
+            isRecognizingText = false
+            return
+        }
+        recognizedLines = []
+        recognizedURL = nil
+        isRecognizingText = true
+        textTask = Task { [weak self] in
+            // Always the full-resolution, upright image (never the blurry placeholder).
+            let image = await ImageLoader.shared.load(url)
+            guard let cgImage = image?.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                self?.isRecognizingText = false
+                return
+            }
+            let lines = await Task.detached(priority: .userInitiated) { TextRecognizer.recognize(cgImage) }.value
+            guard let self, !Task.isCancelled, self.displayedURL == url, self.isTextRecognitionOn else { return }
+            self.textCache[url] = lines
+            self.recognizedLines = lines
+            self.recognizedURL = url
+            self.isRecognizingText = false
+        }
+    }
+
+    /// Copies the selected lines (or all of them) in reading order.
+    func copyRecognizedText(all: Bool = false) {
+        let lines = all || selectedLineIDs.isEmpty
+            ? recognizedLines
+            : recognizedLines.filter { selectedLineIDs.contains($0.id) }
+        guard !lines.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(lines.map(\.text).joined(separator: "\n"), forType: .string)
+        showToast("Copied \(lines.count) line\(lines.count == 1 ? "" : "s") of text", canUndo: false)
+    }
+
+    func selectAllRecognizedText() {
+        selectedLineIDs = Set(recognizedLines.map(\.id))
     }
 
     func togglePlayback() {
@@ -1193,6 +1265,8 @@ final class BrowserModel {
             for url in changed {
                 ImageLoader.shared.invalidate(url)
                 ThumbnailLoader.shared.invalidate(url)
+                textCache[url] = nil
+                if recognizedURL == url { recognizedURL = nil }
             }
             let viewing = displayedURL.flatMap { changed.contains($0) ? $0 : nil }
             if viewing != nil {
@@ -1459,7 +1533,9 @@ final class BrowserModel {
         case 49: // space: play/pause a video, otherwise open/close the viewer
             if videoPlayer != nil { togglePlayback() } else { toggleViewer() }
         case 53: // escape
-            if isViewing {
+            if isTextRecognitionOn {
+                isTextRecognitionOn = false
+            } else if isViewing {
                 closeViewer()
             } else if selectedURLs.count > 1 {
                 selectedURLs = selection.map { [$0] } ?? [] // collapse to the focused item

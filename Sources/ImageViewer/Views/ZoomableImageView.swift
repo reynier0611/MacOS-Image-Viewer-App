@@ -8,6 +8,10 @@ struct ZoomableImageView: NSViewRepresentable {
     let imageURL: URL?
     let zoomRequest: ZoomRequest?
     let enlargeSmallImages: Bool
+    var textLines: [RecognizedLine] = []
+    var selectedLines: Set<Int> = []
+    var onTextSelectionChange: (Set<Int>) -> Void = { _ in }
+    var onCopyText: () -> Void = {}
     let onZoomChange: (Int) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -31,6 +35,11 @@ struct ZoomableImageView: NSViewRepresentable {
         imageView.isEditable = false
         imageView.coordinator = context.coordinator
         scrollView.documentView = imageView
+
+        let textOverlay = TextOverlayView(frame: imageView.bounds)
+        textOverlay.autoresizingMask = [.width, .height]
+        imageView.addSubview(textOverlay)
+        context.coordinator.textOverlay = textOverlay
 
         let coordinator = context.coordinator
         coordinator.scrollView = scrollView
@@ -57,12 +66,19 @@ struct ZoomableImageView: NSViewRepresentable {
             coordinator.lastZoomID = request.id
             coordinator.perform(request.action)
         }
+        if let overlay = coordinator.textOverlay {
+            overlay.onSelectionChange = onTextSelectionChange
+            overlay.onCopy = onCopyText
+            if overlay.lines != textLines { overlay.lines = textLines }
+            if overlay.selected != selectedLines { overlay.selected = selectedLines }
+        }
     }
 
     @MainActor
     final class Coordinator: NSObject {
         weak var scrollView: NSScrollView?
         weak var imageView: NSImageView?
+        weak var textOverlay: TextOverlayView?
         var url: URL?
         var fitMode = true
         var enlargeSmallImages = true
@@ -87,6 +103,7 @@ struct ZoomableImageView: NSViewRepresentable {
         @objc private func didEndLiveMagnify(_ notification: Notification) {
             fitMode = false
             reportZoom()
+            textOverlay?.needsDisplay = true
         }
 
         @objc private func frameDidChange(_ notification: Notification) {
@@ -169,9 +186,160 @@ struct ZoomableImageView: NSViewRepresentable {
 
         private func reportZoom() {
             guard let scrollView else { return }
+            textOverlay?.needsDisplay = true // keep outline widths constant on screen
             let percent = Int((scrollView.magnification * backingScale * 100).rounded())
             // Deferred so we never mutate SwiftUI state mid-update.
             DispatchQueue.main.async { [onZoomChange] in onZoomChange?(percent) }
+        }
+    }
+}
+
+/// Highlights recognized text lines on top of the image, in image coordinates, so the
+/// highlights follow zoom and pan. Click / ⌘-click / ⇧-click / drag to select lines,
+/// ⌘C to copy, ⌘A to select all, double-click to copy one line.
+final class TextOverlayView: NSView, NSMenuItemValidation {
+    var lines: [RecognizedLine] = [] {
+        didSet {
+            anchor = nil
+            needsDisplay = true
+            window?.invalidateCursorRects(for: self)
+        }
+    }
+    var selected: Set<Int> = [] {
+        didSet { needsDisplay = true }
+    }
+    var onSelectionChange: (Set<Int>) -> Void = { _ in }
+    var onCopy: () -> Void = {}
+
+    private var anchor: Int?
+    private var dragStart: NSPoint?
+    private var dragBase: Set<Int> = []
+    private var band: NSRect?
+
+    override var acceptsFirstResponder: Bool { !lines.isEmpty }
+
+    private var magnification: CGFloat { enclosingScrollView?.magnification ?? 1 }
+
+    private func outline(_ line: RecognizedLine) -> NSBezierPath {
+        let path = NSBezierPath()
+        let points = line.corners.map { NSPoint(x: $0.x * bounds.width, y: $0.y * bounds.height) }
+        path.move(to: points[0])
+        points.dropFirst().forEach { path.line(to: $0) }
+        path.close()
+        return path
+    }
+
+    private func rect(_ line: RecognizedLine) -> NSRect {
+        let b = line.bounds
+        return NSRect(x: b.minX * bounds.width, y: b.minY * bounds.height, width: b.width * bounds.width, height: b.height * bounds.height)
+    }
+
+    private func line(at point: NSPoint) -> RecognizedLine? {
+        // A little slack around each line makes small text easy to hit.
+        let slack = 4 / magnification
+        return lines.first { rect($0).insetBy(dx: -slack, dy: -slack).contains(point) }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard !lines.isEmpty else { return }
+        // Soften the photo so the highlighted text stands out.
+        NSColor.black.withAlphaComponent(0.18).setFill()
+        bounds.fill()
+        let width = 1.5 / magnification
+        for line in lines {
+            let path = outline(line)
+            path.lineWidth = width
+            path.lineJoinStyle = .round
+            if selected.contains(line.id) {
+                NSColor.controlAccentColor.withAlphaComponent(0.4).setFill()
+                NSColor.controlAccentColor.setStroke()
+            } else {
+                NSColor.systemYellow.withAlphaComponent(0.22).setFill()
+                NSColor.systemYellow.withAlphaComponent(0.95).setStroke()
+            }
+            path.fill()
+            path.stroke()
+        }
+        if let band {
+            let path = NSBezierPath(rect: band)
+            path.lineWidth = width
+            path.setLineDash([4 / magnification, 3 / magnification], count: 2, phase: 0)
+            NSColor.controlAccentColor.withAlphaComponent(0.12).setFill()
+            NSColor.controlAccentColor.setStroke()
+            path.fill()
+            path.stroke()
+        }
+    }
+
+    /// Only text is clickable; everywhere else, clicks fall through to the image (panning, double-click zoom).
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !lines.isEmpty, let superview else { return nil }
+        return line(at: convert(point, from: superview)) != nil ? self : nil
+    }
+
+    override func resetCursorRects() {
+        for line in lines {
+            addCursorRect(rect(line), cursor: .pointingHand)
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        let point = convert(event.locationInWindow, from: nil)
+        guard let hit = line(at: point) else { return }
+        if event.clickCount == 2 {
+            update([hit.id])
+            onCopy()
+            return
+        }
+        let modifiers = event.modifierFlags
+        if modifiers.contains(.shift), let anchor,
+           let from = lines.firstIndex(where: { $0.id == anchor }),
+           let to = lines.firstIndex(where: { $0.id == hit.id }) {
+            update(selected.union(lines[min(from, to)...max(from, to)].map(\.id)))
+        } else if modifiers.contains(.command) {
+            update(selected.symmetricDifference([hit.id]))
+            anchor = hit.id
+        } else {
+            update([hit.id])
+            anchor = hit.id
+        }
+        dragStart = point
+        dragBase = selected
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let start = dragStart else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        let rect = NSRect(x: min(start.x, point.x), y: min(start.y, point.y), width: abs(point.x - start.x), height: abs(point.y - start.y))
+        band = rect
+        update(dragBase.union(lines.filter { self.rect($0).intersects(rect) }.map(\.id)))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        dragStart = nil
+        band = nil
+        needsDisplay = true
+    }
+
+    private func update(_ selection: Set<Int>) {
+        selected = selection
+        onSelectionChange(selection)
+    }
+
+    // Edit ▸ Copy (⌘C) and Edit ▸ Select All (⌘A) reach this view while it has focus.
+    @objc func copy(_ sender: Any?) {
+        onCopy()
+    }
+
+    override func selectAll(_ sender: Any?) {
+        update(Set(lines.map(\.id)))
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(copy(_:)), #selector(selectAll(_:)): !lines.isEmpty
+        default: true
         }
     }
 }

@@ -46,8 +46,6 @@ struct AppCommands: Commands {
                 .keyboardShortcut("i")
             Toggle("Show Filmstrip", isOn: $model.showFilmstrip)
                 .keyboardShortcut("f", modifiers: [.command, .option])
-            Toggle("Show Histogram in Inspector", isOn: $model.showHistogram)
-            Toggle("Show Map in Inspector", isOn: $model.showMap)
             Divider()
             Button("Zoom In") { model.zoom(.zoomIn) }
                 .keyboardShortcut("=")
@@ -69,6 +67,12 @@ struct AppCommands: Commands {
         }
 
         CommandMenu("Image") {
+            Toggle("Recognize Text", isOn: Binding(
+                get: { model.isTextRecognitionOn },
+                set: { _ in model.toggleTextRecognition() }
+            ))
+            .keyboardShortcut("t")
+            Divider()
             Button("Rotate Left") { model.changeOrientation(.rotateLeft) }
                 .keyboardShortcut("l")
             Button("Rotate Right") { model.changeOrientation(.rotateRight) }

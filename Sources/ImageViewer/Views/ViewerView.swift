@@ -37,6 +37,13 @@ struct ViewerView: View {
                 edgeButton("chevron.right", enabled: (model.viewerIndex ?? 0) < model.images.count - 1) { model.step(1) }
             }
             .overlay(alignment: .topLeading) { infoPill }
+            .overlay(alignment: .top) {
+                if model.isTextRecognitionOn {
+                    TextRecognitionBar()
+                        .padding(.top, 14)
+                        .onHover { isPointerOverControls = $0 }
+                }
+            }
             .overlay(alignment: .bottom) {
                 if hasFilmstrip {
                     FilmstripView()
@@ -71,7 +78,11 @@ struct ViewerView: View {
                 image: model.currentImage,
                 imageURL: model.displayedURL,
                 zoomRequest: model.zoomRequest,
-                enlargeSmallImages: model.enlargeSmallImages
+                enlargeSmallImages: model.enlargeSmallImages,
+                textLines: model.isTextRecognitionOn ? model.recognizedLines : [],
+                selectedLines: model.selectedLineIDs,
+                onTextSelectionChange: { model.selectedLineIDs = $0 },
+                onCopyText: { model.copyRecognizedText() }
             ) { model.zoomPercent = $0 }
         }
     }
@@ -176,6 +187,55 @@ struct AmbientBackdrop: View {
                     image = thumbnail
                 }
             }
+    }
+}
+
+/// Status and actions for recognized text. Stays visible (doesn't auto-hide) while text mode is on.
+struct TextRecognitionBar: View {
+    @Environment(BrowserModel.self) private var model
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "text.viewfinder")
+                .foregroundStyle(.tint)
+            if model.isRecognizingText {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Recognizing text…")
+            } else if model.recognizedLines.isEmpty {
+                Text("No text found")
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(summary)
+                    .monospacedDigit()
+                Divider().frame(height: 16)
+                Button("Copy") { model.copyRecognizedText() }
+                    .disabled(model.selectedLineIDs.isEmpty)
+                    .help("Copy the selected lines (⌘C)")
+                Button("Copy All") { model.copyRecognizedText(all: true) }
+                Button("Select All") { model.selectAllRecognizedText() }
+                    .help("Select every line (⌘A)")
+            }
+            Button {
+                model.isTextRecognitionOn = false
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .help("Hide text (Esc)")
+        }
+        .buttonStyle(.borderless)
+        .font(.callout)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .glassSurface(in: Capsule())
+    }
+
+    private var summary: String {
+        let count = model.recognizedLines.count
+        let selected = model.selectedLineIDs.count
+        let lines = "\(count) line\(count == 1 ? "" : "s")"
+        return selected == 0 ? "\(lines) · click to select" : "\(lines) · \(selected) selected"
     }
 }
 

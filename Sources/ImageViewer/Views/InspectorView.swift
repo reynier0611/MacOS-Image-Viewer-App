@@ -9,23 +9,9 @@ struct InspectorView: View {
     @State private var labels: [String]?
     @State private var showAllProperties = false
 
+    // The histogram and map live here, so they only appear while the (i) inspector is open.
     var body: some View {
-        @Bindable var model = model
         VStack(spacing: 0) {
-            // Optional detail sections; both off until turned on (then remembered).
-            HStack(spacing: 8) {
-                Toggle(isOn: $model.showHistogram) {
-                    Label("Histogram", systemImage: "chart.bar.xaxis")
-                }
-                Toggle(isOn: $model.showMap) {
-                    Label("Map", systemImage: "map")
-                }
-            }
-            .toggleStyle(.button)
-            .controlSize(.small)
-            .padding(.vertical, 8)
-            Divider()
-
             if let item = model.inspectedItem {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
@@ -37,7 +23,7 @@ struct InspectorView: View {
                             ThumbnailView(item: item, size: 200)
                                 .frame(maxWidth: .infinity)
                         }
-                        if model.showHistogram && !item.isDirectory && !item.isVideo {
+                        if !item.isDirectory && !item.isVideo {
                             section("Histogram") {
                                 if let histogram {
                                     HistogramView(histogram: histogram)
@@ -47,9 +33,7 @@ struct InspectorView: View {
                                 }
                             }
                         }
-                        if model.showMap {
-                            mapSection(for: item)
-                        }
+                        mapSection(for: item)
                         if let metadata {
                             ForEach(metadata.sections) { section in
                                 self.section(section.title) {
@@ -98,9 +82,9 @@ struct InspectorView: View {
                         labels = await ContentAnalyzer.shared.labels(for: item)
                     }
                 }
-                .task(id: HistogramKey(url: item.url, enabled: model.showHistogram, modified: item.modified)) {
+                .task(id: HistogramKey(url: item.url, modified: item.modified)) {
                     histogram = nil
-                    guard model.showHistogram, !item.isVideo, !item.isDirectory else { return }
+                    guard !item.isVideo, !item.isDirectory else { return }
                     let url = item.url
                     histogram = await Task.detached(priority: .userInitiated) { Histogram.compute(for: url) }.value
                 }
@@ -113,7 +97,6 @@ struct InspectorView: View {
 
     private struct HistogramKey: Hashable {
         let url: URL
-        let enabled: Bool
         let modified: Date
     }
 
@@ -137,15 +120,12 @@ struct InspectorView: View {
         }
     }
 
+    /// Only shown when the photo (or some selected photos) has a location.
     @ViewBuilder
     private func mapSection(for item: FileItem) -> some View {
         let points = mapPoints(for: item)
-        section(points.count > 1 ? "Map (\(points.count) photos)" : "Map") {
-            if points.isEmpty {
-                Text(item.isDirectory ? "Select photos to see where they were taken." : "No location information in this file.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            } else {
+        if !points.isEmpty {
+            section(points.count > 1 ? "Map (\(points.count) photos)" : "Map") {
                 Map(initialPosition: .automatic) {
                     ForEach(points) { point in
                         Marker(point.name, systemImage: "photo", coordinate: point.coordinate.location)
