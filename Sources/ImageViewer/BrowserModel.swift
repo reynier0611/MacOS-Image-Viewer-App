@@ -676,8 +676,21 @@ final class BrowserModel {
         selection = items[target].url
     }
 
+    /// Gives the keyboard back to browsing after typing in the search field (or any text field).
+    /// Without this, a focused search field keeps receiving the arrow keys even after you click
+    /// thumbnails or open an image, so ← → stop navigating. The search text is kept.
+    func endTextEditing(in window: NSWindow? = nil) {
+        let window = window ?? NSApp.keyWindow ?? NSApp.mainWindow
+            ?? NSApp.windows.first { $0.isVisible && !($0 is NSPanel) }
+        guard let window, !(window is NSPanel), window.attachedSheet == nil,
+              window.firstResponder is NSText
+        else { return }
+        window.makeFirstResponder(nil)
+    }
+
     /// Plain click selects one, ⌘ toggles, ⇧ adds the range from the focused item.
     func click(_ item: FileItem, modifiers: NSEvent.ModifierFlags) {
+        endTextEditing()
         let items = gridItems
         if modifiers.contains(.shift),
            let anchor = selection,
@@ -701,6 +714,7 @@ final class BrowserModel {
 
     /// Used by the drag-selection rectangle.
     func setSelection(_ urls: Set<URL>, focus: URL?) {
+        endTextEditing()
         isAdjustingSelection = true
         defer { isAdjustingSelection = false }
         selection = focus ?? urls.first
@@ -708,6 +722,7 @@ final class BrowserModel {
     }
 
     func clearSelection() {
+        endTextEditing()
         selection = nil
     }
 
@@ -717,6 +732,7 @@ final class BrowserModel {
     }
 
     func activate(_ item: FileItem) {
+        endTextEditing()
         if item.isDirectory {
             navigate(to: item.url)
         } else if let index = images.firstIndex(where: { $0.url == item.url }) {
@@ -879,6 +895,7 @@ final class BrowserModel {
 
     /// Next/previous image in the viewer, or next/previous item in the grid.
     func step(_ delta: Int) {
+        endTextEditing()
         guard let index = viewerIndex else {
             moveSelection(by: delta)
             return
@@ -1511,9 +1528,17 @@ final class BrowserModel {
         guard let window = event.window,
               !(window is NSPanel),
               window.attachedSheet == nil,
-              window.sheetParent == nil,
-              !(window.firstResponder is NSText) // typing in a text field
+              window.sheetParent == nil
         else { return false }
+        if let editor = window.firstResponder as? NSTextView {
+            // In the toolbar search field, ↓ (like Finder) and Return move on to the results.
+            if editor.delegate is NSSearchField, [125, 36, 76].contains(event.keyCode) {
+                endTextEditing(in: window)
+                return true
+            }
+            return false // typing in a text field: leave the keys alone
+        }
+        if window.firstResponder is NSText { return false }
 
         let modifiers = event.modifierFlags
             .intersection(.deviceIndependentFlagsMask)

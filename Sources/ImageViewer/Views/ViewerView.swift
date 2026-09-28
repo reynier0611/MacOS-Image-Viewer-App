@@ -282,7 +282,10 @@ struct FilmstripView: View {
                                     .fill(index == model.viewerIndex ? Color.accentColor : .clear)
                             )
                             .contentShape(Rectangle())
-                            .onTapGesture { model.openImage(at: index) }
+                            .onTapGesture {
+                                model.endTextEditing()
+                                model.openImage(at: index)
+                            }
                             .help(item.name)
                             .id(item.url)
                     }

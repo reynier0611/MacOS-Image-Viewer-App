@@ -417,6 +417,8 @@ final class ImageCanvasView: NSImageView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
+        // Clicking the image takes the keyboard back from a text field (e.g. search), so ← → work.
+        if window?.firstResponder is NSText { window?.makeFirstResponder(nil) }
         if event.clickCount == 2 {
             coordinator?.toggleZoom(at: convert(event.locationInWindow, from: nil))
             return
