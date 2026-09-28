@@ -1,59 +1,175 @@
 import AppKit
+import MapKit
 import SwiftUI
 
 struct InspectorView: View {
     @Environment(BrowserModel.self) private var model
     @State private var metadata: ImageMetadata?
+    @State private var histogram: Histogram?
+    @State private var labels: [String]?
     @State private var showAllProperties = false
 
     var body: some View {
-        if let item = model.inspectedItem {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    if !model.isViewing && !item.isDirectory {
-                        ThumbnailView(item: item, size: 200)
-                            .frame(maxWidth: .infinity)
-                    }
-                    if let metadata {
-                        ForEach(metadata.sections) { section in
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(section.title)
-                                    .font(.headline)
-                                rowsGrid(section.rows)
-                                    .font(.callout)
-                            }
+        @Bindable var model = model
+        VStack(spacing: 0) {
+            // Optional detail sections; both off until turned on (then remembered).
+            HStack(spacing: 8) {
+                Toggle(isOn: $model.showHistogram) {
+                    Label("Histogram", systemImage: "chart.bar.xaxis")
+                }
+                Toggle(isOn: $model.showMap) {
+                    Label("Map", systemImage: "map")
+                }
+            }
+            .toggleStyle(.button)
+            .controlSize(.small)
+            .padding(.vertical, 8)
+            Divider()
+
+            if let item = model.inspectedItem {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        if model.selectedURLs.count > 1 && !model.isViewing {
+                            Label("\(model.selectedURLs.count) items selected", systemImage: "checkmark.circle")
+                                .font(.headline)
                         }
-                        if let latitude = metadata.latitude, let longitude = metadata.longitude {
-                            Button {
-                                if let url = URL(string: "https://maps.apple.com/?ll=\(latitude),\(longitude)&q=\(item.name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "Photo")") {
-                                    NSWorkspace.shared.open(url)
+                        if !model.isViewing && !item.isDirectory {
+                            ThumbnailView(item: item, size: 200)
+                                .frame(maxWidth: .infinity)
+                        }
+                        if model.showHistogram && !item.isDirectory && !item.isVideo {
+                            section("Histogram") {
+                                if let histogram {
+                                    HistogramView(histogram: histogram)
+                                        .frame(height: 110)
+                                } else {
+                                    ProgressView().frame(maxWidth: .infinity, minHeight: 110)
                                 }
-                            } label: {
-                                Label("Show in Maps", systemImage: "map")
                             }
                         }
-                        if !metadata.rawProperties.isEmpty {
-                            DisclosureGroup("All Properties (\(metadata.rawProperties.count))", isExpanded: $showAllProperties) {
-                                rowsGrid(metadata.rawProperties)
-                                    .font(.caption)
-                                    .padding(.top, 6)
-                            }
+                        if model.showMap {
+                            mapSection(for: item)
                         }
-                    } else {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
+                        if let metadata {
+                            ForEach(metadata.sections) { section in
+                                self.section(section.title) {
+                                    rowsGrid(section.rows)
+                                        .font(.callout)
+                                }
+                            }
+                            if let labels, !labels.isEmpty {
+                                section("Recognized") {
+                                    Text(labels.prefix(8).joined(separator: ", "))
+                                        .font(.callout)
+                                        .textSelection(.enabled)
+                                    Text("Search for these words to find similar photos.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            if let latitude = metadata.latitude, let longitude = metadata.longitude {
+                                Button {
+                                    openInMaps(latitude: latitude, longitude: longitude, name: item.name)
+                                } label: {
+                                    Label("Open in Maps", systemImage: "map")
+                                }
+                            }
+                            if !metadata.rawProperties.isEmpty {
+                                DisclosureGroup("All Properties (\(metadata.rawProperties.count))", isExpanded: $showAllProperties) {
+                                    rowsGrid(metadata.rawProperties)
+                                        .font(.caption)
+                                        .padding(.top, 6)
+                                }
+                            }
+                        } else {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .task(id: item.url) {
+                    metadata = nil
+                    labels = nil
+                    let url = item.url
+                    metadata = await Task.detached(priority: .userInitiated) { await ImageMetadata.load(for: url) }.value
+                    if !item.isVideo && !item.isDirectory {
+                        labels = await ContentAnalyzer.shared.labels(for: item)
                     }
                 }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .task(id: HistogramKey(url: item.url, enabled: model.showHistogram, modified: item.modified)) {
+                    histogram = nil
+                    guard model.showHistogram, !item.isVideo, !item.isDirectory else { return }
+                    let url = item.url
+                    histogram = await Task.detached(priority: .userInitiated) { Histogram.compute(for: url) }.value
+                }
+            } else {
+                ContentUnavailableView("No Selection", systemImage: "info.circle", description: Text("Select an image to see its details."))
+                    .frame(maxHeight: .infinity)
             }
-            .task(id: item.url) {
-                metadata = nil
-                let url = item.url
-                metadata = await Task.detached(priority: .userInitiated) { await ImageMetadata.load(for: url) }.value
+        }
+    }
+
+    private struct HistogramKey: Hashable {
+        let url: URL
+        let enabled: Bool
+        let modified: Date
+    }
+
+    private struct MapPoint: Identifiable {
+        let name: String
+        let coordinate: Coordinate
+        var id: String { "\(name)|\(coordinate.latitude)|\(coordinate.longitude)" }
+    }
+
+    /// Every selected photo with a location, or just the current one.
+    private func mapPoints(for item: FileItem) -> [MapPoint] {
+        let items = (!model.isViewing && model.selectedURLs.count > 1) ? model.selectedImages : [item]
+        return items.compactMap { item in
+            let coordinate = model.mediaInfo[item.url]?.coordinate
+                ?? metadata.flatMap { m in
+                    item.url == model.inspectedItem?.url
+                        ? m.latitude.flatMap { lat in m.longitude.map { Coordinate(latitude: lat, longitude: $0) } }
+                        : nil
+                }
+            return coordinate.map { MapPoint(name: item.name, coordinate: $0) }
+        }
+    }
+
+    @ViewBuilder
+    private func mapSection(for item: FileItem) -> some View {
+        let points = mapPoints(for: item)
+        section(points.count > 1 ? "Map (\(points.count) photos)" : "Map") {
+            if points.isEmpty {
+                Text(item.isDirectory ? "Select photos to see where they were taken." : "No location information in this file.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                Map(initialPosition: .automatic) {
+                    ForEach(points) { point in
+                        Marker(point.name, systemImage: "photo", coordinate: point.coordinate.location)
+                    }
+                }
+                .id(points.map(\.id).joined()) // re-frame when the selection changes
+                .frame(height: 200)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
             }
-        } else {
-            ContentUnavailableView("No Selection", systemImage: "info.circle", description: Text("Select an image to see its details."))
+        }
+    }
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.headline)
+            content()
+        }
+    }
+
+    private func openInMaps(latitude: Double, longitude: Double, name: String) {
+        let query = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "Photo"
+        if let url = URL(string: "https://maps.apple.com/?ll=\(latitude),\(longitude)&q=\(query)") {
+            NSWorkspace.shared.open(url)
         }
     }
 
@@ -70,5 +186,34 @@ struct InspectorView: View {
                 }
             }
         }
+    }
+}
+
+/// RGB channels blended over the luminance curve, on a dark panel like photo editors use.
+struct HistogramView: View {
+    let histogram: Histogram
+
+    var body: some View {
+        Canvas { context, size in
+            func path(_ values: [Double]) -> Path {
+                var path = Path()
+                path.move(to: CGPoint(x: 0, y: size.height))
+                for (index, value) in values.enumerated() {
+                    let x = size.width * CGFloat(index) / 255
+                    path.addLine(to: CGPoint(x: x, y: size.height * (1 - CGFloat(value))))
+                }
+                path.addLine(to: CGPoint(x: size.width, y: size.height))
+                path.closeSubpath()
+                return path
+            }
+            context.fill(path(histogram.luminance), with: .color(.white.opacity(0.35)))
+            context.blendMode = .screen
+            context.fill(path(histogram.red), with: .color(.red.opacity(0.7)))
+            context.fill(path(histogram.green), with: .color(.green.opacity(0.7)))
+            context.fill(path(histogram.blue), with: .color(.blue.opacity(0.8)))
+        }
+        .padding(6)
+        .background(Color(white: 0.12), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityLabel("Color histogram")
     }
 }

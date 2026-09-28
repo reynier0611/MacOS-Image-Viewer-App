@@ -11,7 +11,13 @@ A native macOS image viewer and browser (SwiftUI, macOS 14 Sonoma or later, Appl
 - Select several images in the grid by dragging a rectangle over them (the grid scrolls when you reach the top or bottom edge), ⌘-click, ⇧-click or ⌘A.
 - Move the selection to another folder: drag it onto a folder tile, a sidebar folder or a folder in the path bar. You can also right-click ▸ **Move to** (subfolders, the enclosing folder, recent destinations, or Choose Folder…) or use **New Folder with Selection** (⌃⌘N). A name clash never overwrites: the incoming file becomes “name 2.jpg”.
 - Move the selection to the Trash (⌘⌫). Undo (⌘Z) reverses any move or trash, including a whole batch. Also Rename, Copy Image, Copy Path, Reveal in Finder, Open in Preview, and Share/AirDrop.
-- Sort by name, date or size. Changes made to the folder outside the app show up automatically.
+- Sort by name, date taken, date modified/created or size. Changes made to the folder outside the app show up automatically.
+- **Search** (toolbar) matches file names *and what's in the photo*, like "beach", "dog" or "sky". Recognition runs on this Mac with Apple's Vision framework and is cached, so each photo is analyzed once. **Filter** by type (photos, videos, RAW) and by date taken (today, last 7/30 days, this year, last year, or a custom range).
+- **Rotate and flip** without losing quality (⌘L / ⌘R). Only the file's orientation tag changes, so pixels are never re-compressed. Works on JPEG, HEIC, PNG and TIFF, one image or a whole selection, with undo. Camera RAW files can't be rotated in place.
+- **Find Duplicates** (⌥⌘D) finds identical copies and visually similar photos (Strict / Normal / Loose), suggests the best copy, and moves the rest to the Trash after you review them.
+- **Batch Rename** (⇧⌘R) renames a selection with a pattern such as `{date}_{n}` (tokens: `{name} {n} {date} {time} {year} {month} {day}`), with a live preview. Undo reverses the whole batch.
+- **Export** (⌘E) saves copies as JPEG, HEIC, PNG or TIFF, optionally resized, keeping camera details and removing location by default. Originals are never changed.
+- The inspector can also show a **histogram** and a **map** of where photos were taken, for one photo or a whole selection. Both are off by default: turn them on with the buttons at the top of the inspector.
 - Open from Finder (right-click an image or folder, then **Open With ▸ Image Viewer**), drag onto the window or Dock icon, or use ⌘O.
 
 ## Build and install (this Mac)
@@ -78,7 +84,11 @@ The first time you browse Desktop, Documents, Downloads or an external drive, ma
 | ⌃⌘N | New Folder with Selection… |
 | ⌘Z | Undo trash / rename |
 | ⇧⌘C / ⌥⌘C | Copy image / copy path |
-| ⌘R | Reveal in Finder |
+| ⌥⌘R | Reveal in Finder |
+| ⌘L / ⌘R | Rotate left / right |
+| ⇧⌘R | Batch rename… |
+| ⌘E | Export… |
+| ⌥⌘D | Find duplicates… |
 | ⇧⌘O | Open in Preview (for editing/markup) |
 | ⇧⌘. | Show hidden files |
 

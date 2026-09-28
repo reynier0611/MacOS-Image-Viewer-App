@@ -24,6 +24,51 @@ extension UTType {
     static let imageViewerSelection = UTType(exportedAs: "local.imageviewer.selection")
 }
 
+enum MediaTypeFilter: String, CaseIterable, Identifiable {
+    case all = "All"
+    case photos = "Photos"
+    case videos = "Videos"
+    case raw = "RAW"
+    var id: String { rawValue }
+}
+
+enum DateFilter: String, CaseIterable, Identifiable {
+    case any = "Any Date"
+    case today = "Today"
+    case last7Days = "Last 7 Days"
+    case last30Days = "Last 30 Days"
+    case thisYear = "This Year"
+    case lastYear = "Last Year"
+    case custom = "Custom Range…"
+    var id: String { rawValue }
+
+    func range(from: Date, to: Date) -> ClosedRange<Date> {
+        let calendar = Calendar.current
+        let now = Date()
+        let today = calendar.startOfDay(for: now)
+        let year = calendar.component(.year, from: now)
+        func startOfYear(_ y: Int) -> Date { calendar.date(from: DateComponents(year: y, month: 1, day: 1))! }
+        switch self {
+        case .any: return Date.distantPast...Date.distantFuture
+        case .today: return today...now
+        case .last7Days: return calendar.date(byAdding: .day, value: -7, to: today)!...now
+        case .last30Days: return calendar.date(byAdding: .day, value: -30, to: today)!...now
+        case .thisYear: return startOfYear(year)...now
+        case .lastYear: return startOfYear(year - 1)...startOfYear(year).addingTimeInterval(-1)
+        case .custom:
+            let start = calendar.startOfDay(for: min(from, to))
+            let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: max(from, to)))!.addingTimeInterval(-1)
+            return start...end
+        }
+    }
+}
+
+struct RenamePlan: Identifiable {
+    let item: FileItem
+    let newName: String
+    var id: URL { item.url }
+}
+
 struct Toast: Identifiable, Equatable {
     let id = UUID()
     let message: String
@@ -38,9 +83,19 @@ final class BrowserModel {
     // MARK: Folder contents
 
     private(set) var folder: URL?
+    /// Every subfolder / image / video in the folder, sorted. `folders` and `images` are
+    /// these lists after the search and filters, and are what the grid and viewer show.
+    private(set) var allFolders: [FileItem] = []
+    private(set) var allImages: [FileItem] = []
     private(set) var folders: [FileItem] = []
-    /// Images and videos (everything the viewer can show), in sort order.
+    /// Images and videos (everything the viewer can show), in sort order, after filters.
     private(set) var images: [FileItem] = []
+    /// Date taken and location per file, filled in the background after a folder loads.
+    private(set) var mediaInfo: [URL: MediaInfo] = [:]
+    /// On-device recognition labels per photo, computed when a search needs them.
+    private(set) var contentLabels: [URL: [String]] = [:]
+    private(set) var contentAnalysisDone = 0
+    private(set) var contentAnalysisTotal = 0
     private(set) var folderError: String?
     private(set) var isLoadingFolder = false
     /// The focused item: arrow keys move it, the inspector shows it. Setting it collapses
@@ -70,7 +125,33 @@ final class BrowserModel {
     private(set) var zoomRequest: ZoomRequest?
     var zoomPercent: Int?
 
+    // MARK: Search & filters
+
+    var searchText = "" {
+        didSet {
+            guard searchText != oldValue else { return }
+            refilter()
+            if !searchText.trimmingCharacters(in: .whitespaces).isEmpty { startContentAnalysisIfNeeded() }
+        }
+    }
+    var typeFilter: MediaTypeFilter = .all { didSet { refilter() } }
+    var dateFilter: DateFilter = .any { didSet { refilter() } }
+    var customDateFrom = Calendar.current.date(byAdding: .month, value: -1, to: Date())! {
+        didSet { if dateFilter == .custom { refilter() } }
+    }
+    var customDateTo = Date() {
+        didSet { if dateFilter == .custom { refilter() } }
+    }
+
+    var hasActiveFilters: Bool { typeFilter != .all || dateFilter != .any }
+    var isFiltering: Bool { hasActiveFilters || !searchText.trimmingCharacters(in: .whitespaces).isEmpty }
+    var isAnalyzingContent: Bool { contentAnalysisDone < contentAnalysisTotal }
+
     // MARK: UI state
+
+    var isDuplicatesPresented = false
+    var isBatchRenamePresented = false
+    var isExportPresented = false
 
     var gridColumns = 1
     var columnVisibility: NavigationSplitViewVisibility = .all
@@ -107,6 +188,13 @@ final class BrowserModel {
     var enlargeSmallImages: Bool {
         didSet { defaults.set(enlargeSmallImages, forKey: Keys.enlargeSmallImages) }
     }
+    /// Optional inspector sections, off by default.
+    var showHistogram: Bool {
+        didSet { defaults.set(showHistogram, forKey: Keys.showHistogram) }
+    }
+    var showMap: Bool {
+        didSet { defaults.set(showMap, forKey: Keys.showMap) }
+    }
 
     // MARK: Internals
 
@@ -117,6 +205,8 @@ final class BrowserModel {
     @ObservationIgnored private var keyMonitor: Any?
     @ObservationIgnored private var loadTask: Task<Void, Never>?
     @ObservationIgnored private var imageTask: Task<Void, Never>?
+    @ObservationIgnored private var indexTask: Task<Void, Never>?
+    @ObservationIgnored private var analysisTask: Task<Void, Never>?
     @ObservationIgnored private var didStart = false
     @ObservationIgnored private var hasExplicitOpen = false
     @ObservationIgnored private var isAdjustingSelection = false
@@ -132,6 +222,8 @@ final class BrowserModel {
         static let showFilmstrip = "showFilmstrip"
         static let showHidden = "showHidden"
         static let enlargeSmallImages = "enlargeSmallImages"
+        static let showHistogram = "showHistogram"
+        static let showMap = "showMap"
         static let lastFolder = "lastFolder"
         static let recentFolders = "recentFolders"
         static let recentMoveDestinations = "recentMoveDestinations"
@@ -146,6 +238,8 @@ final class BrowserModel {
         showFilmstrip = d.object(forKey: Keys.showFilmstrip) as? Bool ?? true
         showHidden = d.bool(forKey: Keys.showHidden)
         enlargeSmallImages = d.object(forKey: Keys.enlargeSmallImages) as? Bool ?? true
+        showHistogram = d.bool(forKey: Keys.showHistogram)
+        showMap = d.bool(forKey: Keys.showMap)
         recentFolders = (d.stringArray(forKey: Keys.recentFolders) ?? [])
             .map { URL(fileURLWithPath: $0, isDirectory: true) }
         recentMoveDestinations = (d.stringArray(forKey: Keys.recentMoveDestinations) ?? [])
@@ -268,8 +362,18 @@ final class BrowserModel {
         closeViewer()
         if changed {
             folder = url
+            allFolders = []
+            allImages = []
             folders = []
             images = []
+            mediaInfo = [:]
+            contentLabels = [:]
+            indexTask?.cancel()
+            analysisTask?.cancel()
+            analysisTask = nil
+            contentAnalysisDone = 0
+            contentAnalysisTotal = 0
+            searchText = ""
             selection = nil
             folderError = nil
             watcher = FolderWatcher(url: url) { [weak self] in self?.reload() }
@@ -357,12 +461,15 @@ final class BrowserModel {
         switch result {
         case .success(let items):
             folderError = nil
-            folders = items.filter(\.isDirectory)
-            images = items.filter { !$0.isDirectory }
+            allFolders = items.filter(\.isDirectory)
+            allImages = items.filter { !$0.isDirectory }
             sortItems()
+            startIndexing()
+            if !searchText.trimmingCharacters(in: .whitespaces).isEmpty { startContentAnalysisIfNeeded() }
         case .failure(let error):
-            folders = []
-            images = []
+            allFolders = []
+            allImages = []
+            refilter()
             folderError = error.localizedDescription
         }
 
@@ -396,14 +503,17 @@ final class BrowserModel {
     }
 
     private func sortItems() {
-        folders.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        allFolders.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         let key = sortKey
         let ascending = sortAscending
-        images.sort { a, b in
+        allImages.sort { a, b in
             let (x, y) = ascending ? (a, b) : (b, a)
             switch key {
             case .name:
                 return x.name.localizedStandardCompare(y.name) == .orderedAscending
+            case .taken:
+                let dx = captureDate(for: x), dy = captureDate(for: y)
+                if dx != dy { return dx < dy }
             case .modified:
                 if x.modified != y.modified { return x.modified < y.modified }
             case .created:
@@ -413,13 +523,130 @@ final class BrowserModel {
             }
             return a.name.localizedStandardCompare(b.name) == .orderedAscending
         }
+        refilter()
     }
 
     private func applySort() {
         sortItems()
-        if isViewing, let url = displayedURL {
-            viewerIndex = images.firstIndex { $0.url == url }
+    }
+
+    // MARK: Filtering
+
+    /// When the photo was taken (EXIF / video metadata), falling back to the file's oldest date.
+    func captureDate(for item: FileItem) -> Date {
+        mediaInfo[item.url]?.captureDate ?? min(item.created, item.modified)
+    }
+
+    func clearFilters() {
+        searchText = ""
+        typeFilter = .all
+        dateFilter = .any
+    }
+
+    private var searchTokens: [String] {
+        searchText.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
+    }
+
+    private func passesFilters(_ item: FileItem, tokens: [String], dates: ClosedRange<Date>?) -> Bool {
+        switch typeFilter {
+        case .all: break
+        case .photos: if item.isVideo { return false }
+        case .videos: if !item.isVideo { return false }
+        case .raw: if !item.isRaw { return false }
         }
+        if let dates, !dates.contains(captureDate(for: item)) { return false }
+        let name = item.name.lowercased()
+        let labels = contentLabels[item.url] ?? []
+        // Every word must match the file name or something recognized in the photo.
+        return tokens.allSatisfy { token in
+            name.contains(token) || labels.contains { $0.contains(token) }
+        }
+    }
+
+    /// Recomputes `folders`/`images` from the full lists, keeping the viewer and selection consistent.
+    private func refilter() {
+        let tokens = searchTokens
+        let dates = dateFilter == .any ? nil : dateFilter.range(from: customDateFrom, to: customDateTo)
+        images = allImages.filter { passesFilters($0, tokens: tokens, dates: dates) }
+        folders = tokens.isEmpty ? allFolders : allFolders.filter { folder in
+            tokens.allSatisfy { folder.name.lowercased().contains($0) }
+        }
+
+        if isViewing, let url = displayedURL {
+            if let index = images.firstIndex(where: { $0.url == url }) {
+                viewerIndex = index
+            } else {
+                closeViewer()
+            }
+        }
+        let visible = Set(gridItems.map(\.url))
+        if let current = selection, !visible.contains(current) {
+            selection = images.first?.url ?? folders.first?.url
+        } else {
+            selectedURLs.formIntersection(visible)
+        }
+    }
+
+    // MARK: Background indexing
+
+    /// Reads date taken and location for every file (cheap header reads, off the main thread).
+    private func startIndexing() {
+        let pending = allImages.filter { mediaInfo[$0.url] == nil }
+        guard !pending.isEmpty, let folder else { return }
+        indexTask?.cancel()
+        indexTask = Task.detached(priority: .utility) { [weak self] in
+            var batch: [URL: MediaInfo] = [:]
+            for (index, item) in pending.enumerated() {
+                if Task.isCancelled { return }
+                batch[item.url] = await MediaIndex.read(item)
+                if batch.count >= 100 || index == pending.count - 1 {
+                    let ready = batch
+                    batch = [:]
+                    await self?.mergeMediaInfo(ready, folder: folder)
+                }
+            }
+        }
+    }
+
+    private func mergeMediaInfo(_ info: [URL: MediaInfo], folder: URL) {
+        guard self.folder == folder else { return }
+        mediaInfo.merge(info) { $1 }
+        if sortKey == .taken {
+            applySort()
+        } else if dateFilter != .any {
+            refilter()
+        }
+    }
+
+    private func startContentAnalysisIfNeeded() {
+        guard analysisTask == nil, let folder else { return }
+        let pending = allImages.filter { !$0.isVideo && contentLabels[$0.url] == nil }
+        guard !pending.isEmpty else { return }
+        contentAnalysisTotal = pending.count
+        contentAnalysisDone = 0
+        analysisTask = Task.detached(priority: .utility) { [weak self] in
+            var batch: [URL: [String]] = [:]
+            for (index, item) in pending.enumerated() {
+                if Task.isCancelled { break }
+                batch[item.url] = await ContentAnalyzer.shared.labels(for: item)
+                if batch.count >= 12 || index == pending.count - 1 {
+                    let ready = batch
+                    batch = [:]
+                    await self?.mergeLabels(ready, done: index + 1, folder: folder)
+                }
+            }
+            await ContentAnalyzer.shared.save()
+        }
+    }
+
+    private func mergeLabels(_ labels: [URL: [String]], done: Int, folder: URL) {
+        guard self.folder == folder else { return }
+        contentLabels.merge(labels) { $1 }
+        contentAnalysisDone = done
+        if done >= contentAnalysisTotal {
+            analysisTask = nil // later searches pick up files added since
+        }
+        if !searchTokens.isEmpty { refilter() }
     }
 
     // MARK: Grid selection
@@ -637,7 +864,7 @@ final class BrowserModel {
         trash(fileActionTargets(for: item))
     }
 
-    private func trash(_ items: [FileItem]) {
+    func trash(_ items: [FileItem]) {
         guard !items.isEmpty else { return }
         var moved: [(original: URL, trashed: URL)] = []
         var removed: Set<URL> = []
@@ -680,6 +907,7 @@ final class BrowserModel {
         let viewedIndex = displayedURL.flatMap { url in images.firstIndex { $0.url == url } }
         let removingViewed = displayedURL.map(urls.contains) ?? false
         images.removeAll { urls.contains($0.url) }
+        allImages.removeAll { urls.contains($0.url) }
 
         if removingViewed, let viewedIndex {
             displayedURL = nil
@@ -937,7 +1165,161 @@ final class BrowserModel {
             MainActor.assumeIsolated { try? model.createFolder(url) }
         }
         // Not reload(): that would cancel a pending refresh that reselects the images just moved back.
+        allFolders.removeAll { $0.url.path == url.path }
         folders.removeAll { $0.url.path == url.path }
+    }
+
+    // MARK: Rotate & flip
+
+    /// Rotates or flips the open image, or every selected image, without re-compressing.
+    func changeOrientation(_ change: OrientationChange, item: FileItem? = nil) {
+        let targets = fileActionTargets(for: item).filter { !$0.isVideo }
+        applyOrientation(change, to: targets.map(\.url))
+    }
+
+    private func applyOrientation(_ change: OrientationChange, to urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        var changed: [URL] = []
+        var failures: [String] = []
+        for url in urls {
+            do {
+                try ImageEditing.changeOrientation(of: url, by: change)
+                changed.append(url)
+            } catch {
+                failures.append(error.localizedDescription)
+            }
+        }
+        if !changed.isEmpty {
+            for url in changed {
+                ImageLoader.shared.invalidate(url)
+                ThumbnailLoader.shared.invalidate(url)
+            }
+            let viewing = displayedURL.flatMap { changed.contains($0) ? $0 : nil }
+            if viewing != nil {
+                displayedURL = nil // force the viewer to decode the new orientation
+            }
+            load(select: selection, viewing: viewing ?? (isViewing ? displayedURL : nil), fallbackIndex: viewerIndex)
+            undoManager?.registerUndo(withTarget: self) { model in
+                MainActor.assumeIsolated { model.applyOrientation(change.inverse, to: changed) }
+            }
+            undoManager?.setActionName(change.rawValue)
+        }
+        if !failures.isEmpty {
+            errorMessage = failures.count == 1 ? failures[0] : "\(failures.count) images couldn't be changed.\n" + failures.joined(separator: "\n")
+        }
+    }
+
+    // MARK: Batch rename
+
+    /// Images the batch tools (rename, export) work on: the open image, or the selection in the grid.
+    var batchTargets: [FileItem] {
+        fileActionTargets().filter { !$0.isDirectory }
+    }
+
+    /// Date taken for each item, reading metadata directly for anything not indexed yet.
+    nonisolated static func captureDates(for items: [FileItem], known: [URL: MediaInfo]) async -> [URL: Date] {
+        var dates: [URL: Date] = [:]
+        for item in items {
+            let date = known[item.url]?.captureDate
+                ?? (item.isVideo ? nil : MediaIndex.readImage(item.url).captureDate)
+            dates[item.url] = date ?? min(item.created, item.modified)
+        }
+        return dates
+    }
+
+    /// Tokens: {name} original name, {n} counter, {date} 2026-09-28, {time} 143012,
+    /// {year} {month} {day}. The extension is always kept.
+    static func renamePlans(
+        for items: [FileItem], template: String, start: Int, digits: Int, dates: [URL: Date]
+    ) -> [RenamePlan] {
+        let dateFormat = DateFormatter()
+        dateFormat.locale = Locale(identifier: "en_US_POSIX")
+        func format(_ date: Date, _ pattern: String) -> String {
+            dateFormat.dateFormat = pattern
+            return dateFormat.string(from: date)
+        }
+        return items.enumerated().map { index, item in
+            let date = dates[item.url] ?? min(item.created, item.modified)
+            let counter = String(format: "%0\(max(1, digits))d", start + index)
+            var base = template
+                .replacingOccurrences(of: "{name}", with: item.url.deletingPathExtension().lastPathComponent)
+                .replacingOccurrences(of: "{n}", with: counter)
+                .replacingOccurrences(of: "{date}", with: format(date, "yyyy-MM-dd"))
+                .replacingOccurrences(of: "{time}", with: format(date, "HHmmss"))
+                .replacingOccurrences(of: "{year}", with: format(date, "yyyy"))
+                .replacingOccurrences(of: "{month}", with: format(date, "MM"))
+                .replacingOccurrences(of: "{day}", with: format(date, "dd"))
+            base = base.trimmingCharacters(in: .whitespaces)
+            let ext = item.url.pathExtension
+            return RenamePlan(item: item, newName: ext.isEmpty ? base : "\(base).\(ext)")
+        }
+    }
+
+    /// Why the plan can't be applied, or nil if it's fine.
+    static func problem(with plans: [RenamePlan]) -> String? {
+        var seen: Set<String> = []
+        let sources = Set(plans.map { $0.item.url.path.lowercased() })
+        for plan in plans {
+            let base = (plan.newName as NSString).deletingPathExtension
+            if base.isEmpty { return "A name would be empty." }
+            if plan.newName.contains("/") || plan.newName.contains(":") { return "Names can't contain “/” or “:”." }
+            if plan.newName.hasPrefix(".") { return "Names can't start with a period." }
+            let key = plan.newName.lowercased()
+            if !seen.insert(key).inserted { return "Two files would both be named “\(plan.newName)”. Add {n} to the pattern." }
+            let destination = plan.item.url.deletingLastPathComponent().appendingPathComponent(plan.newName)
+            if FileManager.default.fileExists(atPath: destination.path), !sources.contains(destination.path.lowercased()) {
+                return "“\(plan.newName)” already exists in this folder."
+            }
+        }
+        return nil
+    }
+
+    func applyBatchRename(_ plans: [RenamePlan]) {
+        let moves = plans
+            .filter { $0.newName != $0.item.name }
+            .map { (from: $0.item.url, to: $0.item.url.deletingLastPathComponent().appendingPathComponent($0.newName)) }
+        guard !moves.isEmpty, Self.problem(with: plans) == nil else { return }
+        let sources = Set(moves.map { $0.from.path.lowercased() })
+        // Renames that swap names, or only change letter case, go through temporary names first.
+        // Both phases happen in one event, so ⌘Z undoes the whole batch in one step.
+        if moves.contains(where: { sources.contains($0.to.path.lowercased()) }) {
+            let temporary = moves.map { move in
+                (from: move.from, to: move.from.deletingLastPathComponent()
+                    .appendingPathComponent(".rename-\(UUID().uuidString).\(move.from.pathExtension)"))
+            }
+            applyMoves(temporary)
+            applyMoves(zip(temporary, moves).map { (from: $0.0.to, to: $0.1.to) })
+        } else {
+            applyMoves(moves)
+        }
+        undoManager?.setActionName("Rename \(moves.count) Items")
+        showToast("Renamed \(moves.count) item\(moves.count == 1 ? "" : "s")", canUndo: true)
+    }
+
+    // MARK: Export
+
+    func runExport(
+        _ items: [FileItem], options: ExportOptions, to directory: URL,
+        progress: @escaping @MainActor (Int) -> Void
+    ) async -> [String] {
+        var failures: [String] = []
+        for (index, item) in items.enumerated() where !item.isVideo {
+            if Task.isCancelled { break }
+            let url = item.url
+            do {
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try Exporter.export(url, to: directory, options: options)
+                }.value
+            } catch {
+                failures.append("“\(item.name)”: \(error.localizedDescription)")
+            }
+            progress(index + 1)
+        }
+        let exported = items.filter { !$0.isVideo }.count - failures.count
+        if exported > 0 {
+            showToast("Exported \(exported) image\(exported == 1 ? "" : "s") to “\(FileManager.default.displayName(atPath: directory.path))”", canUndo: false)
+        }
+        return failures
     }
 
     func beginRename(_ item: FileItem? = nil) {

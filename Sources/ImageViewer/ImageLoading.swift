@@ -49,6 +49,11 @@ final class ThumbnailLoader: @unchecked Sendable {
         latest.object(forKey: url as NSURL)
     }
 
+    /// Drops the placeholder thumbnail after the file's pixels change (e.g. rotation).
+    func invalidate(_ url: URL) {
+        latest.removeObject(forKey: url as NSURL)
+    }
+
     func thumbnail(for item: FileItem, maxPixel: Int) async -> NSImage? {
         let key = key(item, maxPixel)
         if let image = cache.object(forKey: key) { return image }

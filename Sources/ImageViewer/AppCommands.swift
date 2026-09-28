@@ -22,7 +22,7 @@ struct AppCommands: Commands {
                 .keyboardShortcut("o", modifiers: [.command, .shift])
             Button("Open with Default App") { model.openWithDefaultApp() }
             Button("Reveal in Finder") { model.revealInFinder() }
-                .keyboardShortcut("r")
+                .keyboardShortcut("r", modifiers: [.command, .option])
             Divider()
             Button("Move to Folder…") { model.showMovePanel() }
                 .keyboardShortcut("m", modifiers: [.command, .shift])
@@ -46,6 +46,8 @@ struct AppCommands: Commands {
                 .keyboardShortcut("i")
             Toggle("Show Filmstrip", isOn: $model.showFilmstrip)
                 .keyboardShortcut("f", modifiers: [.command, .option])
+            Toggle("Show Histogram in Inspector", isOn: $model.showHistogram)
+            Toggle("Show Map in Inspector", isOn: $model.showMap)
             Divider()
             Button("Zoom In") { model.zoom(.zoomIn) }
                 .keyboardShortcut("=")
@@ -64,6 +66,25 @@ struct AppCommands: Commands {
             Toggle("Show Hidden Files", isOn: $model.showHidden)
                 .keyboardShortcut(".", modifiers: [.command, .shift])
             Divider()
+        }
+
+        CommandMenu("Image") {
+            Button("Rotate Left") { model.changeOrientation(.rotateLeft) }
+                .keyboardShortcut("l")
+            Button("Rotate Right") { model.changeOrientation(.rotateRight) }
+                .keyboardShortcut("r")
+            Button("Flip Horizontal") { model.changeOrientation(.flipHorizontal) }
+            Button("Flip Vertical") { model.changeOrientation(.flipVertical) }
+            Divider()
+            Button("Batch Rename…") { model.isBatchRenamePresented = true }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+            Button("Export…") { model.isExportPresented = true }
+                .keyboardShortcut("e")
+            Divider()
+            Button("Find Duplicates…") { model.isDuplicatesPresented = true }
+                .keyboardShortcut("d", modifiers: [.command, .option])
+            Divider()
+            Button("Clear Search and Filters") { model.clearFilters() }
         }
 
         CommandMenu("Go") {

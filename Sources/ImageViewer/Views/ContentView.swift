@@ -20,6 +20,10 @@ struct ContentView: View {
         .navigationTitle(title)
         .navigationSubtitle(subtitle)
         .toolbar { MainToolbar(model: model) }
+        .searchable(text: $model.searchText, placement: .toolbar, prompt: "Name or contents, e.g. beach")
+        .sheet(isPresented: $model.isDuplicatesPresented) { DuplicatesView() }
+        .sheet(isPresented: $model.isBatchRenamePresented) { BatchRenameView() }
+        .sheet(isPresented: $model.isExportPresented) { ExportView() }
         .overlay(alignment: .bottom) { toastView }
         .dropDestination(for: URL.self) { urls, _ in
             guard let url = urls.first else { return false }
@@ -71,6 +75,9 @@ struct ContentView: View {
             return "\(index + 1) of \(model.images.count)"
         }
         guard model.folder != nil else { return "" }
+        if model.isFiltering {
+            return "Showing \(model.images.count) of \(model.allImages.count)"
+        }
         let videoCount = model.images.filter(\.isVideo).count
         let imageCount = model.images.count - videoCount
         var parts = ["\(imageCount) image\(imageCount == 1 ? "" : "s")"]
@@ -174,6 +181,14 @@ struct MainToolbar: ToolbarContent {
                     Button { model.zoom(.zoomIn) } label: { Label("Zoom In", systemImage: "plus.magnifyingglass") }
                         .help("Zoom in (⌘=)")
                 }
+                if model.currentItem?.isVideo == false {
+                    ControlGroup {
+                        Button { model.changeOrientation(.rotateLeft) } label: { Label("Rotate Left", systemImage: "rotate.left") }
+                            .help("Rotate left (⌘L)")
+                        Button { model.changeOrientation(.rotateRight) } label: { Label("Rotate Right", systemImage: "rotate.right") }
+                            .help("Rotate right (⌘R)")
+                    }
+                }
                 Button { model.toggleFullScreen() } label: {
                     Label("Full Screen", systemImage: "arrow.up.left.and.arrow.down.right")
                 }
@@ -203,10 +218,7 @@ struct MainToolbar: ToolbarContent {
                 }
                 .frame(width: 110)
                 .help("Thumbnail size (⌘- / ⌘=)")
-                Button { model.showOpenPanel() } label: {
-                    Label("Open", systemImage: "folder")
-                }
-                .help("Open a folder or image (⌘O)")
+                FilterButton()
                 Menu {
                     MoveToMenuItems()
                 } label: {
@@ -220,6 +232,12 @@ struct MainToolbar: ToolbarContent {
                 .disabled(model.selectedImages.isEmpty)
                 .help("Move selected images to Trash (⌘⌫). ⌘-click or ⇧-click to select several.")
             }
+            Menu {
+                ToolsMenuItems()
+            } label: {
+                Label("Tools", systemImage: "wand.and.stars")
+            }
+            .help("Rotate, rename, export, find duplicates")
             Toggle(isOn: $model.showInspector) {
                 Label("Inspector", systemImage: "info.circle")
             }

@@ -17,6 +17,14 @@ struct BrowserView: View {
                 }
             } else if let error = model.folderError {
                 ContentUnavailableView("Can't Open Folder", systemImage: "lock", description: Text(error))
+            } else if model.gridItems.isEmpty && model.isFiltering {
+                ContentUnavailableView {
+                    Label("No Matches", systemImage: "magnifyingglass")
+                } description: {
+                    Text(model.isAnalyzingContent ? "Still recognizing photo contents (\(model.contentAnalysisDone) of \(model.contentAnalysisTotal))…" : "Nothing here matches the search and filters.")
+                } actions: {
+                    Button("Clear Search and Filters") { model.clearFilters() }
+                }
             } else if model.gridItems.isEmpty && !model.isLoadingFolder {
                 ContentUnavailableView("No Images", systemImage: "photo", description: Text("This folder has no images or subfolders."))
             } else {
@@ -24,6 +32,13 @@ struct BrowserView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if model.isFiltering {
+                FilterStatusBar()
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
+            }
+        }
         // A floating glass capsule; thumbnails scroll underneath it.
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let folder = model.folder {
