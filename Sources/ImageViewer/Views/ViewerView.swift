@@ -6,6 +6,10 @@ struct ViewerView: View {
     @State private var controlsVisible = true
     @State private var isPointerOverControls = false
     @State private var hideTask: Task<Void, Never>?
+    /// The filmstrip only appears while the pointer is near the bottom edge, so it never hides
+    /// the bottom of the image otherwise.
+    @State private var isPointerNearBottom = false
+    private static let filmstripRevealZone: CGFloat = 120
 
     private var hasFilmstrip: Bool { model.showFilmstrip && model.images.count > 1 }
 
@@ -45,22 +49,34 @@ struct ViewerView: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                if hasFilmstrip {
-                    FilmstripView()
-                        .frame(width: min(CGFloat(model.images.count) * 76 + 20, geometry.size.width - 40))
-                        .glassSurface(in: RoundedRectangle(cornerRadius: 22))
-                        .padding(.bottom, 16)
-                        .onHover { isPointerOverControls = $0 }
-                        .opacity(controlsVisible || model.videoPlayer != nil ? 1 : 0)
-                        .allowsHitTesting(controlsVisible || model.videoPlayer != nil)
+                // Videos keep it visible: the player's own controls sit above it.
+                let visible = hasFilmstrip && (isPointerNearBottom || model.videoPlayer != nil)
+                ZStack(alignment: .bottom) {
+                    // Removed (not just faded) when hidden, so no glass is left on screen;
+                    // it slides in from below the bottom edge and back out.
+                    if visible {
+                        FilmstripView()
+                            .frame(width: min(CGFloat(model.images.count) * 76 + 20, geometry.size.width - 40))
+                            .glassSurface(in: RoundedRectangle(cornerRadius: 22))
+                            .padding(.bottom, 16)
+                            .onHover { isPointerOverControls = $0 }
+                            .transition(.move(edge: .bottom))
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .clipped() // fully out of sight below the edge while sliding away
+                .animation(.easeOut(duration: 0.25), value: visible)
             }
             .glassGroup()
-        }
-        .onContinuousHover { phase in
-            switch phase {
-            case .active: showControls()
-            case .ended: hideControls(hideCursor: false)
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let location):
+                    isPointerNearBottom = location.y > geometry.size.height - Self.filmstripRevealZone
+                    showControls()
+                case .ended:
+                    isPointerNearBottom = false
+                    hideControls(hideCursor: false)
+                }
             }
         }
         .onChange(of: model.viewerIndex, initial: true) { showControls() }

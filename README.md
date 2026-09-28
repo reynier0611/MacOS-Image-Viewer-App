@@ -6,7 +6,7 @@ A native macOS image viewer and browser (SwiftUI, macOS 14 Sonoma or later, Appl
 - Browse any folder as a grid of thumbnails, with a sidebar (Favorites, drives, recent folders) and a clickable path bar.
 - Open an image to see it as large as the window allows. Use ← → to go through the folder, and Esc to go back to the grid.
 - Zoom (pinch, ⌘= / ⌘-, double-click for 100%), drag to pan, full screen with **F**.
-- In the viewer, the arrows, info and filmstrip float over the image and fade out when the mouse rests.
+- In the viewer, the arrows and info float over the image and fade out when the mouse rests. The filmstrip stays hidden, so the whole image is visible, until you move the pointer to the bottom edge.
 - Filmstrip under the viewer, and an inspector (⌘I) with file info, dimensions, camera EXIF and GPS (with "Show in Maps").
 - Select several images in the grid by dragging a rectangle over them (the grid scrolls when you reach the top or bottom edge), ⌘-click, ⇧-click or ⌘A.
 - Move the selection to another folder: drag it onto a folder tile, a sidebar folder or a folder in the path bar. You can also right-click ▸ **Move to** (subfolders, the enclosing folder, recent destinations, or Choose Folder…) or use **New Folder with Selection** (⌃⌘N). A name clash never overwrites: the incoming file becomes “name 2.jpg”.
