@@ -1,12 +1,14 @@
 # Image Viewer
 
-A native macOS image viewer and browser (SwiftUI, macOS 14 Sonoma or later, Apple Silicon and Intel). Always uses the light theme, even when the Mac is in Dark Mode.
+A native macOS image viewer and browser (SwiftUI, macOS 14 Sonoma or later, Apple Silicon and Intel). Always uses the light theme, even when the Mac is in Dark Mode. On macOS 26 (Tahoe) the floating controls use Liquid Glass; older macOS versions get a frosted-glass look instead.
 
+- Opens every image format macOS can decode (JPEG, PNG, HEIC, WebP, AVIF, JPEG XL, TIFF, GIF, BMP, PSD, EXR, SVG, and camera RAW such as CR2/CR3, NEF, ARW, DNG, RAF) and plays videos (MOV, MP4, M4V; H.264, HEVC, ProRes). Space plays/pauses a video.
 - Browse any folder as a grid of thumbnails, with a sidebar (Favorites, drives, recent folders) and a clickable path bar.
 - Open an image to see it as large as the window allows. Use ← → to go through the folder, and Esc to go back to the grid.
 - Zoom (pinch, ⌘= / ⌘-, double-click for 100%), drag to pan, full screen with **F**.
+- In the viewer, the arrows, info and filmstrip float over the image and fade out when the mouse rests.
 - Filmstrip under the viewer, and an inspector (⌘I) with file info, dimensions, camera EXIF and GPS (with "Show in Maps").
-- Select several images in the grid by dragging a rectangle over them, ⌘-click, ⇧-click or ⌘A.
+- Select several images in the grid by dragging a rectangle over them (the grid scrolls when you reach the top or bottom edge), ⌘-click, ⇧-click or ⌘A.
 - Move the selection to another folder: drag it onto a folder tile, a sidebar folder or a folder in the path bar. You can also right-click ▸ **Move to** (subfolders, the enclosing folder, recent destinations, or Choose Folder…) or use **New Folder with Selection** (⌃⌘N). A name clash never overwrites: the incoming file becomes “name 2.jpg”.
 - Move the selection to the Trash (⌘⌫). Undo (⌘Z) reverses any move or trash, including a whole batch. Also Rename, Copy Image, Copy Path, Reveal in Finder, Open in Preview, and Share/AirDrop.
 - Sort by name, date or size. Changes made to the folder outside the app show up automatically.

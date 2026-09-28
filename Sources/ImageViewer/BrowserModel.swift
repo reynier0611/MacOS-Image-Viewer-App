@@ -1,3 +1,4 @@
+import AVFoundation
 import AppKit
 import Observation
 import SwiftUI
@@ -38,6 +39,7 @@ final class BrowserModel {
 
     private(set) var folder: URL?
     private(set) var folders: [FileItem] = []
+    /// Images and videos (everything the viewer can show), in sort order.
     private(set) var images: [FileItem] = []
     private(set) var folderError: String?
     private(set) var isLoadingFolder = false
@@ -60,6 +62,8 @@ final class BrowserModel {
 
     private(set) var viewerIndex: Int?
     private(set) var currentImage: NSImage?
+    /// Set instead of `currentImage` when the open item is a video.
+    private(set) var videoPlayer: AVPlayer?
     private(set) var displayedURL: URL?
     private(set) var isLoadingImage = false
     private(set) var imageError: String?
@@ -500,6 +504,17 @@ final class BrowserModel {
         displayedURL = item.url
         imageError = nil
         imageTask?.cancel()
+        videoPlayer?.pause()
+        videoPlayer = nil
+        if item.isVideo {
+            currentImage = nil
+            isLoadingImage = false
+            zoomPercent = nil
+            let player = AVPlayer(url: item.url)
+            videoPlayer = player
+            player.play()
+            return
+        }
         if let full = ImageLoader.shared.cachedImage(for: item.url) {
             currentImage = full
             isLoadingImage = false
@@ -524,7 +539,7 @@ final class BrowserModel {
 
     private func preloadNeighbors(of url: URL) {
         guard let index = images.firstIndex(where: { $0.url == url }) else { return }
-        for neighbor in [index + 1, index - 1] where images.indices.contains(neighbor) {
+        for neighbor in [index + 1, index - 1] where images.indices.contains(neighbor) && !images[neighbor].isVideo {
             let neighborURL = images[neighbor].url
             Task.detached(priority: .utility) { _ = await ImageLoader.shared.load(neighborURL) }
         }
@@ -532,12 +547,25 @@ final class BrowserModel {
 
     func closeViewer() {
         imageTask?.cancel()
+        videoPlayer?.pause()
+        videoPlayer = nil
         viewerIndex = nil
         displayedURL = nil
         currentImage = nil
         isLoadingImage = false
         imageError = nil
         zoomPercent = nil
+    }
+
+    func togglePlayback() {
+        guard let player = videoPlayer else { return }
+        if player.timeControlStatus == .paused {
+            // Restart from the beginning if the video already ended.
+            if let item = player.currentItem, item.currentTime() >= item.duration { player.seek(to: .zero) }
+            player.play()
+        } else {
+            player.pause()
+        }
     }
 
     func toggleViewer() {
@@ -969,9 +997,12 @@ final class BrowserModel {
         NSWorkspace.shared.open(item.url)
     }
 
+    /// Preview for images, QuickTime Player for videos.
     func openInPreview(_ item: FileItem? = nil) {
         guard let item = item ?? actionImage,
-              let preview = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Preview")
+              let preview = NSWorkspace.shared.urlForApplication(
+                  withBundleIdentifier: item.isVideo ? "com.apple.QuickTimePlayerX" : "com.apple.Preview"
+              )
         else { return }
         NSWorkspace.shared.open([item.url], withApplicationAt: preview, configuration: NSWorkspace.OpenConfiguration())
     }
@@ -1043,7 +1074,8 @@ final class BrowserModel {
         case 36, 76: // return / enter
             guard !isViewing else { return false }
             openSelection()
-        case 49: toggleViewer() // space
+        case 49: // space: play/pause a video, otherwise open/close the viewer
+            if videoPlayer != nil { togglePlayback() } else { toggleViewer() }
         case 53: // escape
             if isViewing {
                 closeViewer()

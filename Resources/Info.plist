@@ -18,6 +18,8 @@
     <string>__BUILD__</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>© 2026 Rey Cruz Torres, PhD</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSApplicationCategoryType</key>
@@ -38,6 +40,7 @@
             <key>LSItemContentTypes</key>
             <array>
                 <string>public.image</string>
+                <string>public.movie</string>
             </array>
         </dict>
         <dict>

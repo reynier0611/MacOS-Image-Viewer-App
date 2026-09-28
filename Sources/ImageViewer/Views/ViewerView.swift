@@ -1,19 +1,22 @@
+import AVKit
 import SwiftUI
 
 struct ViewerView: View {
     @Environment(BrowserModel.self) private var model
-    @State private var isHovering = false
+    @State private var controlsVisible = true
+    @State private var isPointerOverControls = false
+    @State private var hideTask: Task<Void, Never>?
+
+    private var hasFilmstrip: Bool { model.showFilmstrip && model.images.count > 1 }
 
     var body: some View {
-        VStack(spacing: 0) {
+        GeometryReader { geometry in
             ZStack {
                 Color(white: 0.94)
-                ZoomableImageView(
-                    image: model.currentImage,
-                    imageURL: model.displayedURL,
-                    zoomRequest: model.zoomRequest,
-                    enlargeSmallImages: model.enlargeSmallImages
-                ) { model.zoomPercent = $0 }
+                    .ignoresSafeArea()
+                AmbientBackdrop(item: model.currentItem)
+                    .ignoresSafeArea() // flows up under the toolbar's glass
+                content
                 if let error = model.imageError {
                     ContentUnavailableView(error, systemImage: "exclamationmark.triangle")
                 }
@@ -22,6 +25,8 @@ struct ViewerView: View {
                 if model.isLoadingImage {
                     ProgressView()
                         .controlSize(.small)
+                        .padding(10)
+                        .glassSurface(in: Circle())
                         .padding(14)
                 }
             }
@@ -31,50 +36,165 @@ struct ViewerView: View {
             .overlay(alignment: .trailing) {
                 edgeButton("chevron.right", enabled: (model.viewerIndex ?? 0) < model.images.count - 1) { model.step(1) }
             }
-            .overlay(alignment: .bottomLeading) { infoPill }
-            .onHover { isHovering = $0 }
-
-            if model.showFilmstrip && model.images.count > 1 {
-                FilmstripView()
+            .overlay(alignment: .topLeading) { infoPill }
+            .overlay(alignment: .bottom) {
+                if hasFilmstrip {
+                    FilmstripView()
+                        .frame(width: min(CGFloat(model.images.count) * 76 + 20, geometry.size.width - 40))
+                        .glassSurface(in: RoundedRectangle(cornerRadius: 22))
+                        .padding(.bottom, 16)
+                        .onHover { isPointerOverControls = $0 }
+                        .opacity(controlsVisible || model.videoPlayer != nil ? 1 : 0)
+                        .allowsHitTesting(controlsVisible || model.videoPlayer != nil)
+                }
             }
+            .glassGroup()
+        }
+        .onContinuousHover { phase in
+            switch phase {
+            case .active: showControls()
+            case .ended: hideControls(hideCursor: false)
+            }
+        }
+        .onChange(of: model.viewerIndex, initial: true) { showControls() }
+        .onDisappear { hideTask?.cancel() }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let player = model.videoPlayer {
+            VideoPlayerView(player: player)
+                // Keep the player's own controls clear of the floating filmstrip.
+                .padding(.bottom, hasFilmstrip ? 104 : 0)
+        } else {
+            ZoomableImageView(
+                image: model.currentImage,
+                imageURL: model.displayedURL,
+                zoomRequest: model.zoomRequest,
+                enlargeSmallImages: model.enlargeSmallImages
+            ) { model.zoomPercent = $0 }
+        }
+    }
+
+    /// Shows the floating controls, then fades them out after the pointer rests for a moment.
+    private func showControls() {
+        if !controlsVisible {
+            withAnimation(.easeOut(duration: 0.2)) { controlsVisible = true }
+        }
+        hideTask?.cancel()
+        hideTask = Task {
+            try? await Task.sleep(for: .seconds(2.5))
+            guard !Task.isCancelled, !isPointerOverControls else { return }
+            hideControls(hideCursor: true)
+        }
+    }
+
+    private func hideControls(hideCursor: Bool) {
+        hideTask?.cancel()
+        withAnimation(.easeIn(duration: 0.35)) { controlsVisible = false }
+        if hideCursor && model.videoPlayer == nil {
+            NSCursor.setHiddenUntilMouseMoves(true)
         }
     }
 
     private func edgeButton(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
-        let visible = isHovering && enabled
+        let visible = controlsVisible && enabled
         return Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 20, weight: .semibold))
-                .frame(width: 40, height: 72)
-                .contentShape(Rectangle())
+                .font(.system(size: 18, weight: .semibold))
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.white)
-        .background(.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
-        .padding(14)
+        .foregroundStyle(.primary)
+        .glassSurface(in: Circle(), interactive: true)
+        .onHover { isPointerOverControls = $0 }
+        .padding(16)
         .opacity(visible ? 1 : 0)
         .allowsHitTesting(visible)
-        .animation(.easeInOut(duration: 0.15), value: visible)
     }
 
     @ViewBuilder
     private var infoPill: some View {
-        if let image = model.currentImage, model.imageError == nil {
+        if let item = model.currentItem, model.imageError == nil {
             HStack(spacing: 8) {
-                Text("\(Int(image.size.width)) × \(Int(image.size.height))")
-                if let zoom = model.zoomPercent {
+                if item.isVideo {
+                    Image(systemName: "video.fill")
+                } else if let image = model.currentImage {
+                    Text("\(Int(image.size.width)) × \(Int(image.size.height))")
+                }
+                if let zoom = model.zoomPercent, !item.isVideo {
                     Text("\(zoom)%")
+                        .foregroundStyle(.secondary)
+                }
+                Text("\((model.viewerIndex ?? 0) + 1) / \(model.images.count)")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.callout.monospacedDigit())
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .glassSurface(in: Capsule())
+            .padding(14)
+            .opacity(controlsVisible ? 1 : 0)
+            .allowsHitTesting(false)
+        }
+    }
+}
+
+/// A heavily blurred, lightened copy of the current image behind it. It fills the letterbox
+/// with the photo's own colors, which is what the Liquid Glass controls refract.
+struct AmbientBackdrop: View {
+    let item: FileItem?
+    @State private var image: NSImage?
+
+    var body: some View {
+        Color.clear
+            .overlay {
+                if let image {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .blur(radius: 60, opaque: true)
+                        .saturation(1.4)
+                        .overlay(Color.white.opacity(0.3)) // keep it light
+                        .id(ObjectIdentifier(image))
+                        .transition(.opacity)
                 }
             }
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.white.opacity(0.9))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(.black.opacity(0.45), in: Capsule())
-            .padding(12)
-            .opacity(isHovering ? 1 : 0)
-            .animation(.easeInOut(duration: 0.15), value: isHovering)
+            .clipped()
+            .animation(.easeInOut(duration: 0.4), value: image.map(ObjectIdentifier.init))
             .allowsHitTesting(false)
+            .task(id: item?.url) {
+                guard let item else {
+                    image = nil
+                    return
+                }
+                // A small thumbnail is plenty for a 60pt blur, and cheap to render.
+                if let cached = ThumbnailLoader.shared.latest(for: item.url) {
+                    image = cached
+                } else if let thumbnail = await ThumbnailLoader.shared.thumbnail(for: item, maxPixel: 128) {
+                    image = thumbnail
+                }
+            }
+    }
+}
+
+/// AppKit's standard movie player (scrubber, volume, speed, PiP, AirPlay).
+struct VideoPlayerView: NSViewRepresentable {
+    let player: AVPlayer
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.controlsStyle = .floating
+        view.showsFullScreenToggleButton = false
+        view.allowsPictureInPicturePlayback = true
+        view.player = player
+        return view
+    }
+
+    func updateNSView(_ view: AVPlayerView, context: Context) {
+        if view.player !== player {
+            view.player = player
         }
     }
 }
@@ -90,7 +210,7 @@ struct FilmstripView: View {
                         ThumbnailView(item: item, size: 64)
                             .padding(4)
                             .background(
-                                RoundedRectangle(cornerRadius: 6)
+                                RoundedRectangle(cornerRadius: 10)
                                     .fill(index == model.viewerIndex ? Color.accentColor : .clear)
                             )
                             .contentShape(Rectangle())
@@ -100,12 +220,10 @@ struct FilmstripView: View {
                     }
                 }
                 .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(.vertical, 8)
             }
             .scrollIndicators(.hidden)
-            .frame(height: 84)
-            .background(Color(white: 0.985))
-            .overlay(alignment: .top) { Divider() }
+            .frame(height: 88)
             .onChange(of: model.viewerIndex, initial: true) {
                 guard let url = model.currentItem?.url else { return }
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(url, anchor: .center) }

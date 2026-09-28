@@ -71,7 +71,12 @@ struct ContentView: View {
             return "\(index + 1) of \(model.images.count)"
         }
         guard model.folder != nil else { return "" }
-        var parts = ["\(model.images.count) image\(model.images.count == 1 ? "" : "s")"]
+        let videoCount = model.images.filter(\.isVideo).count
+        let imageCount = model.images.count - videoCount
+        var parts = ["\(imageCount) image\(imageCount == 1 ? "" : "s")"]
+        if videoCount > 0 {
+            parts.append("\(videoCount) video\(videoCount == 1 ? "" : "s")")
+        }
         if !model.folders.isEmpty {
             parts.append("\(model.folders.count) folder\(model.folders.count == 1 ? "" : "s")")
         }
@@ -96,11 +101,10 @@ struct ContentView: View {
                     .fontWeight(.semibold)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 9)
-            .background(.regularMaterial, in: Capsule())
-            .shadow(color: .black.opacity(0.2), radius: 6, y: 2)
-            .padding(.bottom, model.isViewing && model.showFilmstrip ? 110 : 44)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+            .glassSurface(in: Capsule())
+            .padding(.bottom, model.isViewing && model.showFilmstrip ? 124 : 60)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }

@@ -1,11 +1,12 @@
 import Foundation
 import UniformTypeIdentifiers
 
-/// A folder or an image file inside the folder being browsed.
+/// A folder, image or video inside the folder being browsed.
 struct FileItem: Identifiable, Hashable {
     let url: URL
     let name: String
     let isDirectory: Bool
+    let isVideo: Bool
     let size: Int64
     let modified: Date
     let created: Date
@@ -17,16 +18,23 @@ struct FileItem: Identifiable, Hashable {
         .contentModificationDateKey, .creationDateKey, .contentTypeKey,
     ]
 
-    /// Returns nil for anything that is neither a plain folder nor an image.
+    /// Returns nil for anything that is not a plain folder, an image or a video.
     init?(url: URL) {
         guard let values = try? url.resourceValues(forKeys: Set(Self.resourceKeys)) else { return nil }
         let isDirectory = (values.isDirectory ?? false) && !(values.isPackage ?? false)
+        var isVideo = false
         if !isDirectory {
-            guard let type = values.contentType, type.conforms(to: .image) else { return nil }
+            guard let type = values.contentType else { return nil }
+            if type.conforms(to: .movie) {
+                isVideo = true
+            } else if !type.conforms(to: .image) {
+                return nil
+            }
         }
         self.url = url
         self.name = url.lastPathComponent
         self.isDirectory = isDirectory
+        self.isVideo = isVideo
         self.size = Int64(values.fileSize ?? 0)
         self.modified = values.contentModificationDate ?? .distantPast
         self.created = values.creationDate ?? .distantPast

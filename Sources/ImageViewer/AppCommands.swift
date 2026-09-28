@@ -1,9 +1,14 @@
+import AppKit
 import SwiftUI
 
 struct AppCommands: Commands {
     @Bindable var model: BrowserModel
 
     var body: some Commands {
+        CommandGroup(replacing: .appInfo) {
+            Button("About Image Viewer") { Self.showAboutPanel() }
+        }
+
         CommandGroup(replacing: .newItem) {
             Button("Open…") { model.showOpenPanel() }
                 .keyboardShortcut("o")
@@ -86,5 +91,20 @@ struct AppCommands: Commands {
             Button("Pictures") { model.goToStandardFolder(.picturesDirectory) }
                 .keyboardShortcut("p", modifiers: [.command, .shift])
         }
+    }
+
+    private static func showAboutPanel() {
+        let centered = NSMutableParagraphStyle()
+        centered.alignment = .center
+        let credits = NSMutableAttributedString(
+            string: "Created by\n",
+            attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: centered]
+        )
+        credits.append(NSAttributedString(
+            string: "Rey Cruz Torres, PhD",
+            attributes: [.font: NSFont.boldSystemFont(ofSize: 12), .foregroundColor: NSColor.labelColor, .paragraphStyle: centered]
+        ))
+        NSApp.orderFrontStandardAboutPanel(options: [.credits: credits])
+        NSApp.activate()
     }
 }

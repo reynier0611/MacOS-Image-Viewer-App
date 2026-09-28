@@ -50,7 +50,7 @@ struct InspectorView: View {
             .task(id: item.url) {
                 metadata = nil
                 let url = item.url
-                metadata = await Task.detached(priority: .userInitiated) { ImageMetadata.load(for: url) }.value
+                metadata = await Task.detached(priority: .userInitiated) { await ImageMetadata.load(for: url) }.value
             }
         } else {
             ContentUnavailableView("No Selection", systemImage: "info.circle", description: Text("Select an image to see its details."))

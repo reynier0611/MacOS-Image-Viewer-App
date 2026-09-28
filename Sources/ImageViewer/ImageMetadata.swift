@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
@@ -20,7 +21,66 @@ struct ImageMetadata {
     var latitude: Double?
     var longitude: Double?
 
-    static func load(for url: URL) -> ImageMetadata {
+    static func load(for url: URL) async -> ImageMetadata {
+        var metadata = loadFileAndImage(for: url)
+        let isVideo = (try? url.resourceValues(forKeys: [.contentTypeKey]))?.contentType?.conforms(to: .movie) ?? false
+        if isVideo, let video = await videoSection(for: url) {
+            metadata.sections.insert(video, at: 1)
+        }
+        return metadata
+    }
+
+    private static func videoSection(for url: URL) async -> MetadataSection? {
+        let asset = AVURLAsset(url: url)
+        var rows: [MetadataRow] = []
+        if let duration = try? await asset.load(.duration), duration.isNumeric {
+            rows.append(.init(label: "Duration", value: formatDuration(duration.seconds)))
+        }
+        if let track = try? await asset.loadTracks(withMediaType: .video).first {
+            if let (size, transform) = try? await track.load(.naturalSize, .preferredTransform) {
+                let rect = CGRect(origin: .zero, size: size).applying(transform)
+                rows.append(.init(label: "Dimensions", value: "\(Int(abs(rect.width))) × \(Int(abs(rect.height)))"))
+            }
+            if let fps = try? await track.load(.nominalFrameRate), fps > 0 {
+                rows.append(.init(label: "Frame Rate", value: String(format: "%.3g fps", fps)))
+            }
+            if let format = try? await track.load(.formatDescriptions).first {
+                rows.append(.init(label: "Codec", value: codecName(CMFormatDescriptionGetMediaSubType(format))))
+            }
+            if let rate = try? await track.load(.estimatedDataRate), rate > 0 {
+                rows.append(.init(label: "Bit Rate", value: String(format: "%.1f Mbps", rate / 1_000_000)))
+            }
+        }
+        if let audio = try? await asset.loadTracks(withMediaType: .audio) {
+            rows.append(.init(label: "Audio", value: audio.isEmpty ? "None" : "Yes"))
+        }
+        if let item = try? await asset.load(.creationDate), let date = try? await item.load(.dateValue) {
+            rows.append(.init(label: "Recorded", value: date.formatted(date: .abbreviated, time: .standard)))
+        }
+        return rows.isEmpty ? nil : MetadataSection(title: "Video", rows: rows)
+    }
+
+    private static func formatDuration(_ seconds: Double) -> String {
+        let total = Int(seconds.rounded())
+        let (h, m, s) = (total / 3600, (total % 3600) / 60, total % 60)
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
+    }
+
+    private static func codecName(_ code: FourCharCode) -> String {
+        let chars = [24, 16, 8, 0].map { Character(UnicodeScalar(UInt8((code >> $0) & 0xFF))) }
+        let fourCC = String(chars).trimmingCharacters(in: .whitespaces)
+        switch fourCC {
+        case "avc1", "avc3": return "H.264"
+        case "hvc1", "hev1": return "HEVC (H.265)"
+        case "apcn", "apch", "apcs", "apco", "ap4h", "ap4x": return "Apple ProRes"
+        case "av01": return "AV1"
+        case "vp09": return "VP9"
+        case "jpeg": return "Motion JPEG"
+        default: return fourCC
+        }
+    }
+
+    private static func loadFileAndImage(for url: URL) -> ImageMetadata {
         var metadata = ImageMetadata()
         let values = try? url.resourceValues(forKeys: [
             .contentTypeKey, .fileSizeKey, .creationDateKey, .contentModificationDateKey, .isDirectoryKey,

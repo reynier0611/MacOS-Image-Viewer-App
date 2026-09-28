@@ -24,15 +24,17 @@ struct BrowserView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // A floating glass capsule; thumbnails scroll underneath it.
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let folder = model.folder {
-                VStack(spacing: 0) {
-                    Divider()
-                    PathBar(url: folder) { model.navigate(to: $0) }
-                        .padding(.horizontal, 10)
-                        .frame(height: 26)
-                }
-                .background(.bar)
+                PathBar(url: folder) { model.navigate(to: $0) }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .glassSurface(in: Capsule())
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -40,9 +42,22 @@ struct BrowserView: View {
 
 struct ThumbnailGrid: View {
     @Environment(BrowserModel.self) private var model
+    /// Frames of every cell laid out so far. Accumulated (not replaced) because the lazy grid
+    /// discards off-screen cells, and a selection rectangle can extend past the visible area.
     @State private var cellFrames: [URL: CGRect] = [:]
-    @State private var marquee: CGRect?
+    @State private var cellFramesLayout = 0
+    @State private var marqueeStart: CGPoint?
+    @State private var marqueeEnd: CGPoint = .zero
     @State private var marqueeBase: Set<URL> = []
+    @State private var autoScroller = AutoScroller()
+
+    private var marquee: CGRect? {
+        guard let start = marqueeStart else { return nil }
+        return CGRect(
+            x: min(start.x, marqueeEnd.x), y: min(start.y, marqueeEnd.y),
+            width: abs(marqueeEnd.x - start.x), height: abs(marqueeEnd.y - start.y)
+        )
+    }
 
     private let spacing: CGFloat = 12
     private let padding: CGFloat = 16
@@ -54,6 +69,8 @@ struct ThumbnailGrid: View {
 
         GeometryReader { geometry in
             let columns = max(1, Int((geometry.size.width - padding * 2 + spacing) / (cellWidth + spacing)))
+            // Changes whenever cell positions could change, so stale remembered frames get replaced.
+            let layout = Hasher.hash(columns, size, model.gridItems.map(\.url))
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVGrid(
@@ -61,7 +78,7 @@ struct ThumbnailGrid: View {
                         spacing: 16
                     ) {
                         ForEach(model.gridItems) { item in
-                            cell(for: item, size: size)
+                            cell(for: item, size: size, layout: layout)
                         }
                     }
                     .padding(padding)
@@ -76,10 +93,22 @@ struct ThumbnailGrid: View {
                             }
                             .gesture(marqueeGesture)
                     }
+                    .background(ScrollViewFinder { autoScroller.scrollView = $0 })
                     .overlay(alignment: .topLeading) { marqueeView }
                     .coordinateSpace(name: Self.space)
-                    .onPreferenceChange(CellFramesKey.self) { cellFrames = $0 }
+                    .onPreferenceChange(CellFramesKey.self) { reported in
+                        if reported.layout != cellFramesLayout {
+                            cellFramesLayout = reported.layout
+                            cellFrames = reported.frames
+                        } else {
+                            cellFrames.merge(reported.frames) { $1 }
+                        }
+                        if marqueeStart != nil { updateMarqueeSelection() }
+                    }
                 }
+                // While images are being dragged over the grid, scroll near the edges so
+                // off-screen folders can be reached. Folder tiles handle the actual drop.
+                .onDrop(of: [.imageViewerSelection], delegate: AutoScrollDropDelegate(scroller: autoScroller))
                 .onChange(of: columns, initial: true) { model.gridColumns = columns }
                 .onChange(of: model.selection) { _, selection in
                     guard let selection, !model.isViewing, marquee == nil else { return }
@@ -94,10 +123,13 @@ struct ThumbnailGrid: View {
     }
 
     @ViewBuilder
-    private func cell(for item: FileItem, size: CGFloat) -> some View {
+    private func cell(for item: FileItem, size: CGFloat, layout: Int) -> some View {
         let base = GridCell(item: item, size: size, isSelected: model.selectedURLs.contains(item.url))
             .background(GeometryReader { geometry in
-                Color.clear.preference(key: CellFramesKey.self, value: [item.url: geometry.frame(in: .named(Self.space))])
+                Color.clear.preference(
+                    key: CellFramesKey.self,
+                    value: CellFrames(layout: layout, frames: [item.url: geometry.frame(in: .named(Self.space))])
+                )
             })
             .id(item.url)
             .onTapGesture(count: 2) { model.activate(item) }
@@ -121,22 +153,30 @@ struct ThumbnailGrid: View {
     private var marqueeGesture: some Gesture {
         DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.space))
             .onChanged { value in
-                if marquee == nil {
+                if marqueeStart == nil {
                     let flags = NSEvent.modifierFlags
                     marqueeBase = flags.contains(.command) || flags.contains(.shift) ? model.selectedURLs : []
+                    marqueeStart = value.startLocation
+                    // Scroll when the pointer nears the top/bottom edge; the rectangle follows the content.
+                    autoScroller.start { delta in
+                        marqueeEnd.y += delta
+                        updateMarqueeSelection()
+                    }
                 }
-                let rect = CGRect(
-                    x: min(value.startLocation.x, value.location.x),
-                    y: min(value.startLocation.y, value.location.y),
-                    width: abs(value.location.x - value.startLocation.x),
-                    height: abs(value.location.y - value.startLocation.y)
-                )
-                marquee = rect
-                let hits = Set(cellFrames.filter { $0.value.intersects(rect) }.map(\.key))
-                let focus = model.gridItems.first { hits.contains($0.url) }?.url
-                model.setSelection(marqueeBase.union(hits), focus: focus ?? model.selection)
+                marqueeEnd = value.location
+                updateMarqueeSelection()
             }
-            .onEnded { _ in marquee = nil }
+            .onEnded { _ in
+                autoScroller.stop()
+                marqueeStart = nil
+            }
+    }
+
+    private func updateMarqueeSelection() {
+        guard let rect = marquee else { return }
+        let hits = Set(cellFrames.filter { $0.value.intersects(rect) }.map(\.key))
+        let focus = model.gridItems.first { hits.contains($0.url) }?.url
+        model.setSelection(marqueeBase.union(hits), focus: focus ?? model.selection)
     }
 
     @ViewBuilder
@@ -152,10 +192,129 @@ struct ThumbnailGrid: View {
     }
 }
 
+/// Scrolls the grid while a selection rectangle or dragged images get near (or past) its top or bottom edge.
+@MainActor
+final class AutoScroller {
+    weak var scrollView: NSScrollView?
+    private var timer: Timer?
+    private var onScroll: ((CGFloat) -> Void)?
+
+    /// `onScroll` receives how far the content moved, in SwiftUI (top-down) points.
+    func start(onScroll: ((CGFloat) -> Void)? = nil) {
+        self.onScroll = onScroll
+        guard timer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
+        }
+        // `.common`, not the default mode: while the mouse button is held, AppKit runs the
+        // run loop in event-tracking mode and a default-mode timer would never fire.
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        onScroll = nil
+    }
+
+    private func tick() {
+        // Safety net: never keep scrolling once the button is released.
+        guard NSEvent.pressedMouseButtons != 0 else {
+            stop()
+            return
+        }
+        guard let scrollView, let window = scrollView.window else { return }
+        let frame = scrollView.convert(scrollView.bounds, to: nil) // window coordinates, y up
+        let insets = scrollView.contentView.contentInsets // toolbar above, path bar below
+        let mouse = window.mouseLocationOutsideOfEventStream
+        let zone: CGFloat = 50
+        let fromTop = (frame.maxY - insets.top) - mouse.y
+        let fromBottom = mouse.y - (frame.minY + insets.bottom)
+        // Speeds up the closer the pointer gets, and keeps accelerating past the edge.
+        var speed: CGFloat = 0
+        if fromTop < zone {
+            speed = -min(3, (zone - fromTop) / zone)
+        } else if fromBottom < zone {
+            speed = min(3, (zone - fromBottom) / zone)
+        }
+        if speed != 0 { scroll(speed: speed) }
+    }
+
+    /// Scrolls by `speed` steps (negative = up) and reports the content movement.
+    func scroll(speed: CGFloat) {
+        guard let scrollView, let document = scrollView.documentView else { return }
+        let clip = scrollView.contentView
+        let direction: CGFloat = clip.isFlipped ? 1 : -1
+        let before = clip.bounds.origin.y
+        let insets = clip.contentInsets
+        let minOffset = clip.isFlipped ? -insets.top : -insets.bottom
+        let maxOffset = max(minOffset, document.frame.height - clip.bounds.height + (clip.isFlipped ? insets.bottom : insets.top))
+        let target = min(max(before + speed * 14 * direction, minOffset), maxOffset)
+        guard target != before else { return }
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: target))
+        scrollView.reflectScrolledClipView(clip)
+        onScroll?((target - before) * direction)
+    }
+}
+
+private struct AutoScrollDropDelegate: DropDelegate {
+    let scroller: AutoScroller
+
+    func validateDrop(info: DropInfo) -> Bool { true }
+    func dropEntered(info: DropInfo) { scroller.start() }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        scroller.start()
+        return DropProposal(operation: .forbidden) // empty grid space isn't a destination
+    }
+
+    func dropExited(info: DropInfo) { scroller.stop() }
+
+    func performDrop(info: DropInfo) -> Bool {
+        scroller.stop()
+        return false
+    }
+}
+
+/// Hands back the AppKit scroll view that hosts a SwiftUI ScrollView's content.
+private struct ScrollViewFinder: NSViewRepresentable {
+    let found: (NSScrollView) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = PassthroughView()
+        DispatchQueue.main.async { if let scrollView = view.enclosingScrollView { found(scrollView) } }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        if let scrollView = view.enclosingScrollView { found(scrollView) }
+    }
+
+    private final class PassthroughView: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
+private struct CellFrames: Equatable {
+    var layout = 0
+    var frames: [URL: CGRect] = [:]
+}
+
 private struct CellFramesKey: PreferenceKey {
-    static let defaultValue: [URL: CGRect] = [:]
-    static func reduce(value: inout [URL: CGRect], nextValue: () -> [URL: CGRect]) {
-        value.merge(nextValue()) { $1 }
+    static let defaultValue = CellFrames()
+    static func reduce(value: inout CellFrames, nextValue: () -> CellFrames) {
+        let next = nextValue()
+        value.layout = next.layout
+        value.frames.merge(next.frames) { $1 }
+    }
+}
+
+private extension Hasher {
+    static func hash<each T: Hashable>(_ values: repeat each T) -> Int {
+        var hasher = Hasher()
+        repeat hasher.combine(each values)
+        return hasher.finalize()
     }
 }
 
@@ -303,6 +462,16 @@ struct ThumbnailView: View {
                     .interpolation(.high)
                     .aspectRatio(contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .overlay(alignment: .bottomLeading) {
+                        if item.isVideo {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: max(7, size * 0.08)))
+                                .foregroundStyle(.white)
+                                .padding(max(4, size * 0.04))
+                                .background(.black.opacity(0.5), in: Circle())
+                                .padding(max(3, size * 0.03))
+                        }
+                    }
                     .shadow(color: .black.opacity(0.25), radius: 1.5, y: 1)
             } else {
                 RoundedRectangle(cornerRadius: 4)
@@ -332,7 +501,7 @@ struct ItemContextMenu: View {
     var body: some View {
         Button("Open") { model.activate(item) }
         if !item.isDirectory {
-            Button("Open in Preview") { model.openInPreview(item) }
+            Button(item.isVideo ? "Open in QuickTime Player" : "Open in Preview") { model.openInPreview(item) }
             Button("Open with Default App") { model.openWithDefaultApp(item) }
         }
         Button("Reveal in Finder") { model.revealInFinder(item) }
@@ -409,27 +578,32 @@ struct PathBar: View {
     }
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 3) {
-                ForEach(Array(components.enumerated()), id: \.offset) { index, component in
-                    if index > 0 {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 8, weight: .semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                    Button { onSelect(component) } label: {
-                        HStack(spacing: 3) {
-                            Image(nsImage: NSWorkspace.shared.icon(forFile: component.path))
-                                .resizable()
-                                .frame(width: 14, height: 14)
-                            Text(FileManager.default.displayName(atPath: component.path))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .folderDropTarget(component, cornerRadius: 4)
-                    .font(.caption)
-                    .foregroundStyle(index == components.count - 1 ? .primary : .secondary)
+        ViewThatFits(in: .horizontal) {
+            crumbs
+            ScrollView(.horizontal, showsIndicators: false) { crumbs }
+        }
+    }
+
+    private var crumbs: some View {
+        HStack(spacing: 3) {
+            ForEach(Array(components.enumerated()), id: \.offset) { index, component in
+                if index > 0 {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.tertiary)
                 }
+                Button { onSelect(component) } label: {
+                    HStack(spacing: 3) {
+                        Image(nsImage: NSWorkspace.shared.icon(forFile: component.path))
+                            .resizable()
+                            .frame(width: 14, height: 14)
+                        Text(FileManager.default.displayName(atPath: component.path))
+                    }
+                }
+                .buttonStyle(.plain)
+                .folderDropTarget(component, cornerRadius: 4)
+                .font(.caption)
+                .foregroundStyle(index == components.count - 1 ? .primary : .secondary)
             }
         }
     }

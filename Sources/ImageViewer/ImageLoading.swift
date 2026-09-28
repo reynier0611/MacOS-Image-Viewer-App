@@ -1,3 +1,4 @@
+import AVFoundation
 import AppKit
 import ImageIO
 import UniformTypeIdentifiers
@@ -58,9 +59,14 @@ final class ThumbnailLoader: @unchecked Sendable {
             return nil
         }
         let url = item.url
-        let image = await Task.detached(priority: .userInitiated) {
-            Self.makeThumbnail(url: url, maxPixel: maxPixel)
-        }.value
+        let image: NSImage?
+        if item.isVideo {
+            image = await Self.makeVideoThumbnail(url: url, maxPixel: maxPixel)
+        } else {
+            image = await Task.detached(priority: .userInitiated) {
+                Self.makeThumbnail(url: url, maxPixel: maxPixel)
+            }.value
+        }
         await limiter.release()
 
         if let image {
@@ -72,6 +78,20 @@ final class ThumbnailLoader: @unchecked Sendable {
 
     private func key(_ item: FileItem, _ maxPixel: Int) -> NSString {
         "\(item.url.path)|\(maxPixel)|\(item.modified.timeIntervalSince1970)" as NSString
+    }
+
+    /// A frame about a second in (or a third of the way into very short clips), which avoids black opening frames.
+    private static func makeVideoThumbnail(url: URL, maxPixel: Int) async -> NSImage? {
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: maxPixel, height: maxPixel)
+        generator.requestedTimeToleranceBefore = CMTime(seconds: 1, preferredTimescale: 600)
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 1, preferredTimescale: 600)
+        let duration = (try? await asset.load(.duration))?.seconds ?? 0
+        let time = CMTime(seconds: duration.isFinite ? min(1, duration / 3) : 0, preferredTimescale: 600)
+        guard let cgImage = try? await generator.image(at: time).image else { return nil }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
 
     private static func makeThumbnail(url: URL, maxPixel: Int) -> NSImage? {
