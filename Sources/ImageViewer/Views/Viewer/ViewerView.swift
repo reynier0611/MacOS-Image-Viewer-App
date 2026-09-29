@@ -18,8 +18,10 @@ struct ViewerView: View {
             ZStack {
                 Color(white: 0.94)
                     .ignoresSafeArea()
-                AmbientBackdrop(item: model.currentItem)
-                    .ignoresSafeArea() // flows up under the toolbar's glass
+                if model.viewerBackground == .blurredPhoto {
+                    AmbientBackdrop(item: model.currentItem)
+                        .ignoresSafeArea() // flows up under the toolbar's glass
+                }
                 content
                 if let error = model.imageError {
                     ContentUnavailableView(error, systemImage: "exclamationmark.triangle")

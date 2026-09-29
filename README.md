@@ -94,15 +94,40 @@ The first time you browse Desktop, Documents, Downloads or an external drive, ma
 | ⇧⌘O | Open in Preview (for editing/markup) |
 | ⇧⌘. | Show hidden files |
 
+## Settings and help
+
+- **Image Viewer ▸ Settings… (⌘,)**
+  - *General*: where the app starts when opened on its own (Home by default), sorting, thumbnail size, hidden files.
+  - *Viewer*: blurred-photo or plain background, enlarging small images, the filmstrip.
+  - *Privacy*: the remembered "Move to" folders and the cache of recognized photo contents; turn off or clear either.
+- **Help ▸ Keyboard Shortcuts (⌘/)** lists every shortcut.
+
+## Tests
+
+```sh
+./test.sh                  # all tests (~1 second)
+./test.sh --filter Rename  # just some of them
+```
+
+The tests use real image files generated in a temporary folder. They cover:
+
+- rotation math and lossless rotation
+- export, the histogram, and metadata reading (date taken, GPS)
+- search and filter rules, and batch-rename plans
+- text recognition and duplicate detection
+- the browser model: selection, keyboard focus, rename/move/rotate with undo, settings
+
+`test.sh` works with just the Command Line Tools. It points `swift test` at Swift Testing, which the tools install outside the default search path.
+
 ## Code layout
 
 ```
 Sources/ImageViewer/
-  ImageViewerApp.swift      App entry, window, Finder "Open With" handling
-  BrowserModel.swift        All state: folder, selection, viewer, history, file ops, keyboard
-  FileItem.swift            A folder or image in the listing
-  ImageLoading.swift        Thumbnail and full-size decoding and caches (ImageIO)
-  ImageMetadata.swift       EXIF / TIFF / GPS extraction for the inspector
-  AppCommands.swift         Menu bar
-  Views/                    Sidebar, grid, viewer (AppKit zoom view), inspector
+  App/          App entry, windows, menu bar
+  Model/        BrowserModel (all app state), split by feature:
+                +Filtering, +Selection, +Viewer, +FileOperations, +ImageTools, +Keyboard
+  Services/     Image loading and caches, metadata, EXIF/GPS index, OCR, duplicates, export, rotation
+  Views/        Browser (sidebar, grid, drag & drop), Viewer (zoomable image, text overlay),
+                Inspector, Tools (filters, rename, export, duplicates), Settings, Shared
+Tests/ImageViewerTests/
 ```

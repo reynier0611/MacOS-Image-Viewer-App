@@ -3,8 +3,14 @@ import SwiftUI
 
 struct AppCommands: Commands {
     @Bindable var model: BrowserModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
+        CommandGroup(replacing: .help) {
+            Button("Keyboard Shortcuts") { openWindow(id: "shortcuts") }
+                .keyboardShortcut("/")
+        }
+
         CommandGroup(replacing: .appInfo) {
             Button("About Image Viewer") { Self.showAboutPanel() }
         }

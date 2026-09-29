@@ -112,6 +112,18 @@ actor ContentAnalyzer {
         return labels
     }
 
+    /// Settings ▸ Privacy: forget everything recognized so far. Returns how many photos were cached.
+    @discardableResult
+    func clearCache() -> Int {
+        let count = cache.count
+        cache = [:]
+        unsavedChanges = 0
+        try? FileManager.default.removeItem(at: cacheURL)
+        return count
+    }
+
+    var cachedCount: Int { cache.count }
+
     func save() {
         guard unsavedChanges > 0, let data = try? JSONEncoder().encode(cache) else { return }
         try? data.write(to: cacheURL, options: .atomic)

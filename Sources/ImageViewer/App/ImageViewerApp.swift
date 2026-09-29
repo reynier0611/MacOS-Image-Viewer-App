@@ -14,6 +14,16 @@ struct ImageViewerApp: App {
         }
         .defaultSize(width: 1280, height: 820)
         .commands { AppCommands(model: model) }
+
+        Settings {
+            SettingsView()
+                .environment(model)
+        }
+
+        Window("Keyboard Shortcuts", id: "shortcuts") {
+            ShortcutsView()
+        }
+        .defaultSize(width: 860, height: 820)
     }
 }
 

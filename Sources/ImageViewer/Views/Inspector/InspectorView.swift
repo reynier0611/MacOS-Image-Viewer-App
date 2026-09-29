@@ -122,16 +122,29 @@ struct InspectorView: View {
         let points = mapPoints(for: item)
         if !points.isEmpty {
             section(points.count > 1 ? "Map (\(points.count) photos)" : "Map") {
-                Map(initialPosition: .automatic) {
+                Map(initialPosition: initialMapPosition(for: points)) {
                     ForEach(points) { point in
                         Marker(point.name, systemImage: "photo", coordinate: point.coordinate.location)
                     }
                 }
+                // +/− buttons (a mouse wheel pans the map; pinch also zooms), compass and scale.
+                .mapControls {
+                    MapZoomStepper()
+                    MapCompass()
+                    MapScaleView()
+                }
                 .id(points.map(\.id).joined()) // re-frame when the selection changes
-                .frame(height: 200)
+                .frame(height: 240)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             }
         }
+    }
+
+    /// One photo: start zoomed out to the surrounding region (~100 km across) rather than street level.
+    /// Several photos: fit them all.
+    private func initialMapPosition(for points: [MapPoint]) -> MapCameraPosition {
+        guard points.count == 1, let point = points.first else { return .automatic }
+        return .camera(MapCamera(centerCoordinate: point.coordinate.location, distance: 150_000))
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
