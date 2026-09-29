@@ -4,6 +4,7 @@ import SwiftUI
 struct SidebarView: View {
     @Environment(BrowserModel.self) private var model
     @State private var volumes: [URL] = []
+    @State private var volumeNames: [URL: String] = [:]
 
     private struct Favorite: Identifiable {
         let title: String
@@ -52,18 +53,6 @@ struct SidebarView: View {
                     }
                 }
             }
-            let favoritePaths = Set(Self.favorites.map(\.url.path))
-            let recents = model.recentFolders.filter { !favoritePaths.contains($0.path) }.prefix(8)
-            if !recents.isEmpty {
-                Section("Recent") {
-                    ForEach(Array(recents), id: \.self) { url in
-                        Label(FileManager.default.displayName(atPath: url.path), systemImage: "folder")
-                            .folderDropTarget(url)
-                            .help(url.path)
-                            .tag(url.path)
-                    }
-                }
-            }
         }
         .listStyle(.sidebar)
         .onAppear { refreshVolumes() }
@@ -82,16 +71,27 @@ struct SidebarView: View {
         )
     }
 
+    /// Off the main thread: an unreachable network drive can make these calls hang for a long
+    /// time, which would otherwise freeze the window while the app launches.
     private func refreshVolumes() {
-        volumes = (FileManager.default.mountedVolumeURLs(
-            includingResourceValuesForKeys: [.volumeNameKey, .volumeIsBrowsableKey],
-            options: [.skipHiddenVolumes]
-        ) ?? []).filter {
-            (try? $0.resourceValues(forKeys: [.volumeIsBrowsableKey]))?.volumeIsBrowsable ?? true
+        Task.detached(priority: .utility) {
+            let found = (FileManager.default.mountedVolumeURLs(
+                includingResourceValuesForKeys: [.volumeNameKey, .volumeIsBrowsableKey],
+                options: [.skipHiddenVolumes]
+            ) ?? []).filter {
+                (try? $0.resourceValues(forKeys: [.volumeIsBrowsableKey]))?.volumeIsBrowsable ?? true
+            }
+            let names = Dictionary(uniqueKeysWithValues: found.map {
+                ($0, (try? $0.resourceValues(forKeys: [.volumeNameKey]))?.volumeName ?? $0.lastPathComponent)
+            })
+            await MainActor.run {
+                volumes = found
+                volumeNames = names
+            }
         }
     }
 
     private func volumeName(_ url: URL) -> String {
-        (try? url.resourceValues(forKeys: [.volumeNameKey]))?.volumeName ?? url.lastPathComponent
+        volumeNames[url] ?? url.lastPathComponent
     }
 }

@@ -110,7 +110,6 @@ final class BrowserModel {
 
     private(set) var backStack: [URL] = []
     private(set) var forwardStack: [URL] = []
-    private(set) var recentFolders: [URL] = []
     private(set) var recentMoveDestinations: [URL] = []
 
     // MARK: Viewer
@@ -235,8 +234,6 @@ final class BrowserModel {
         static let showFilmstrip = "showFilmstrip"
         static let showHidden = "showHidden"
         static let enlargeSmallImages = "enlargeSmallImages"
-        static let lastFolder = "lastFolder"
-        static let recentFolders = "recentFolders"
         static let recentMoveDestinations = "recentMoveDestinations"
     }
 
@@ -249,8 +246,9 @@ final class BrowserModel {
         showFilmstrip = d.object(forKey: Keys.showFilmstrip) as? Bool ?? true
         showHidden = d.bool(forKey: Keys.showHidden)
         enlargeSmallImages = d.object(forKey: Keys.enlargeSmallImages) as? Bool ?? true
-        recentFolders = (d.stringArray(forKey: Keys.recentFolders) ?? [])
-            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+        // Earlier versions remembered the last and recent folders; forget them.
+        d.removeObject(forKey: "lastFolder")
+        d.removeObject(forKey: "recentFolders")
         recentMoveDestinations = (d.stringArray(forKey: Keys.recentMoveDestinations) ?? [])
             .map { URL(fileURLWithPath: $0, isDirectory: true) }
     }
@@ -298,8 +296,9 @@ final class BrowserModel {
         installKeyMonitor()
     }
 
-    /// Called once launching finishes, after any files Finder asked us to open have arrived,
-    /// so a launch via "Open With" doesn't first flash the last-used folder.
+    /// Called once launching finishes, after any files Finder asked us to open have arrived.
+    /// Opened with a file or folder → that. Opened directly → always the home folder
+    /// (the app deliberately doesn't remember where you were last time).
     func openDefaultFolderIfNeeded() {
         guard !didStart else { return }
         didStart = true
@@ -310,11 +309,7 @@ final class BrowserModel {
             open(URL(fileURLWithPath: arg))
             return
         }
-        if let last = defaults.string(forKey: Keys.lastFolder), FileManager.default.fileExists(atPath: last) {
-            navigate(to: URL(fileURLWithPath: last, isDirectory: true), recordHistory: false)
-        } else if let pictures = FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask).first {
-            navigate(to: pictures, recordHistory: false)
-        }
+        navigate(to: FileManager.default.homeDirectoryForCurrentUser, recordHistory: false)
     }
 
     /// Opens a folder (browse it) or an image (browse its folder and show the image).
@@ -386,7 +381,6 @@ final class BrowserModel {
             selection = nil
             folderError = nil
             watcher = FolderWatcher(url: url) { [weak self] in self?.reload() }
-            remember(url)
         }
         load(select: select, viewing: openViewer ? select : nil)
     }
@@ -426,14 +420,6 @@ final class BrowserModel {
 
     func reload() {
         load(select: selection, viewing: isViewing ? displayedURL : nil, fallbackIndex: viewerIndex)
-    }
-
-    private func remember(_ url: URL) {
-        defaults.set(url.path, forKey: Keys.lastFolder)
-        recentFolders.removeAll { $0.path == url.path }
-        recentFolders.insert(url, at: 0)
-        recentFolders = Array(recentFolders.prefix(10))
-        defaults.set(recentFolders.map(\.path), forKey: Keys.recentFolders)
     }
 
     private func load(select: URL?, viewing: URL?, fallbackIndex: Int? = nil, alsoSelect: [URL] = []) {
