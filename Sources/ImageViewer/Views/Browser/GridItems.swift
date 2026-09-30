@@ -120,10 +120,8 @@ struct ItemContextMenu: View {
         }
         Button("Copy Path") { model.copyPath(item) }
         ShareLink(item: item.url)
-        if !item.isDirectory {
-            Divider()
-            Button("Rename…") { model.beginRename(item) }
-        }
+        Divider()
+        Button("Rename…") { model.beginRename(item) }
         let targets = model.fileActionTargets(for: item)
         if !targets.isEmpty {
             Divider()

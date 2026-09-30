@@ -35,7 +35,7 @@ struct ContentView: View {
             Button("Rename") { model.commitRename() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("The file extension is kept.")
+            Text(model.isRenamingFolder ? "Rename this folder." : "The file extension is kept.")
         }
         .alert("New Folder with Selection", isPresented: $model.isNewFolderPresented) {
             TextField("Folder name", text: $model.newFolderName)

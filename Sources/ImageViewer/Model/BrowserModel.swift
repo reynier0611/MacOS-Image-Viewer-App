@@ -40,8 +40,8 @@ final class BrowserModel {
     /// Everything highlighted in the grid (⌘-click / ⇧-click / ⌘A).
     var selectedURLs: Set<URL> = []
 
-    private(set) var backStack: [URL] = []
-    private(set) var forwardStack: [URL] = []
+    var backStack: [URL] = []
+    var forwardStack: [URL] = []
     var recentMoveDestinations: [URL] = []
 
     // MARK: Viewer
@@ -106,6 +106,8 @@ final class BrowserModel {
     var errorMessage: String?
     var isRenamePresented = false
     var renameText = ""
+    /// Whether the item being renamed is a folder (the whole name is editable; no extension is kept).
+    var isRenamingFolder = false
     var isGoToFolderPresented = false
     var isNewFolderPresented = false
     var newFolderName = ""

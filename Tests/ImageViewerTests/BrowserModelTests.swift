@@ -196,4 +196,78 @@ struct BrowserModelTests {
         model.rememberMoveDestination(folder.url)
         #expect(model.recentMoveDestinations.isEmpty)
     }
+
+    // MARK: Renaming
+
+    func entries() throws -> Set<String> {
+        Set(try FileManager.default.contentsOfDirectory(atPath: folder.url.path))
+    }
+
+    @Test func renamesAFolderKeepingDotsInItsNameAndUndoes() async throws {
+        let trip = folder.url.appendingPathComponent("2024.06 Trip", isDirectory: true)
+        try FileManager.default.createDirectory(at: trip, withIntermediateDirectories: true)
+        Fixtures.write(Fixtures.solid(CGColor(gray: 0.4, alpha: 1)), to: trip.appendingPathComponent("inside.jpg"))
+        try await open(["a.jpg"])
+        let item = try #require(model.folders.first { $0.name == "2024.06 Trip" })
+
+        model.beginRename(item)
+        #expect(model.isRenamingFolder)
+        #expect(model.renameText == "2024.06 Trip") // whole name, not "2024"
+        model.renameText = "2024.07 Beach"
+        grouped { model.commitRename() }
+
+        #expect(try entries().contains("2024.07 Beach"))
+        #expect(FileManager.default.fileExists(atPath: folder.url.appendingPathComponent("2024.07 Beach/inside.jpg").path))
+        try await waitUntil { model.folders.map(\.name) == ["2024.07 Beach"] }
+
+        undoLastAction()
+        #expect(try entries().contains("2024.06 Trip"))
+        try await waitUntil { model.folders.map(\.name) == ["2024.06 Trip"] }
+    }
+
+    @Test func changingOnlyLetterCaseWorksForFilesAndFolders() async throws {
+        try FileManager.default.createDirectory(at: folder.url.appendingPathComponent("trip"), withIntermediateDirectories: true)
+        try await open(["photo.jpg"])
+
+        model.beginRename(model.folders.first { $0.name == "trip" })
+        model.renameText = "Trip"
+        grouped { model.commitRename() }
+        model.beginRename(model.allImages.first { $0.name == "photo.jpg" })
+        model.renameText = "Photo"
+        grouped { model.commitRename() }
+
+        #expect(model.errorMessage == nil)
+        #expect(try entries() == ["Trip", "Photo.jpg"])
+    }
+
+    @Test("Rejects invalid names", arguments: ["", "  ", "a/b", "a:b", ".hidden"])
+    func rejectsInvalidNames(name: String) async throws {
+        try FileManager.default.createDirectory(at: folder.url.appendingPathComponent("Keep"), withIntermediateDirectories: true)
+        try await open(["x.jpg"])
+        model.errorMessage = nil
+        model.beginRename(model.folders.first { $0.name == "Keep" })
+        model.renameText = name
+        grouped { model.commitRename() }
+        #expect(model.errorMessage != nil)
+        #expect(try entries() == ["Keep", "x.jpg"])
+        model.errorMessage = nil
+    }
+
+    @Test func backHistoryFollowsARenamedFolder() async throws {
+        let old = folder.url.appendingPathComponent("Old", isDirectory: true)
+        try FileManager.default.createDirectory(at: old.appendingPathComponent("Inner"), withIntermediateDirectories: true)
+        try await open(["x.jpg"])
+        model.navigate(to: old.appendingPathComponent("Inner"))
+        model.navigate(to: folder.url) // history: …, root, Old/Inner
+        try await waitUntil { model.folders.contains { $0.name == "Old" } }
+
+        model.beginRename(model.folders.first { $0.name == "Old" })
+        model.renameText = "New"
+        grouped { model.commitRename() }
+
+        #expect(model.backStack.last?.path.hasSuffix("/New/Inner") == true)
+        model.goBack()
+        #expect(model.folder?.lastPathComponent == "Inner")
+        #expect(model.folder?.deletingLastPathComponent().lastPathComponent == "New")
+    }
 }

@@ -336,10 +336,13 @@ extension BrowserModel {
         folders.removeAll { $0.url.path == url.path }
     }
 
+    /// Renames the given item, or the open image / the selected file or folder.
     func beginRename(_ item: FileItem? = nil) {
-        guard let item = item ?? actionImage else { return }
+        guard let item = item ?? (isViewing ? currentItem : selectedItem) else { return }
         renameItem = item
-        renameText = item.url.deletingPathExtension().lastPathComponent
+        isRenamingFolder = item.isDirectory
+        // Folders like "2024.06 Trip" have no extension to protect: edit the whole name.
+        renameText = item.isDirectory ? item.name : item.url.deletingPathExtension().lastPathComponent
         isRenamePresented = true
     }
 
@@ -347,29 +350,41 @@ extension BrowserModel {
         guard let item = renameItem else { return }
         renameItem = nil
         let base = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !base.isEmpty, !base.contains("/"), !base.hasPrefix(".") else {
-            errorMessage = "“\(base)” isn't a valid name."
+        guard !base.isEmpty, !base.contains("/"), !base.contains(":"), !base.hasPrefix(".") else {
+            errorMessage = "“\(base)” isn't a valid name. Names can't be empty, contain “/” or “:”, or start with a period."
             return
         }
+        let parent = item.url.deletingLastPathComponent()
         let ext = item.url.pathExtension
-        let destination = item.url.deletingLastPathComponent()
-            .appendingPathComponent(ext.isEmpty ? base : "\(base).\(ext)")
+        let destination = item.isDirectory
+            ? parent.appendingPathComponent(base, isDirectory: true)
+            : parent.appendingPathComponent(ext.isEmpty ? base : "\(base).\(ext)")
         rename(from: item.url, to: destination)
     }
 
     func rename(from source: URL, to destination: URL) {
         guard source.path != destination.path else { return }
-        guard !FileManager.default.fileExists(atPath: destination.path) else {
+        // On a case-insensitive disk (the macOS default) "trip" and "Trip" are the same name,
+        // so a case-only change must go through a temporary name.
+        let caseOnly = source.path.lowercased() == destination.path.lowercased()
+        guard caseOnly || !FileManager.default.fileExists(atPath: destination.path) else {
             errorMessage = "An item named “\(destination.lastPathComponent)” already exists."
             return
         }
         do {
-            try FileManager.default.moveItem(at: source, to: destination)
+            if caseOnly {
+                let temporary = source.deletingLastPathComponent().appendingPathComponent(".rename-\(UUID().uuidString)")
+                try FileManager.default.moveItem(at: source, to: temporary)
+                try FileManager.default.moveItem(at: temporary, to: destination)
+            } else {
+                try FileManager.default.moveItem(at: source, to: destination)
+            }
         } catch {
             errorMessage = "Couldn't rename “\(source.lastPathComponent)”.\n\(error.localizedDescription)"
             return
         }
         ImageLoader.shared.invalidate(source)
+        updateRememberedPaths(from: source, to: destination)
         let wasViewing = displayedURL == source
         if wasViewing {
             // Same pixels, new name: keep showing the current image without a reload.
@@ -380,6 +395,29 @@ extension BrowserModel {
             MainActor.assumeIsolated { model.rename(from: destination, to: source) }
         }
         undoManager?.setActionName("Rename")
+    }
+
+    /// After a folder is renamed, Back/Forward, remembered "Move to" folders and the launch folder
+    /// setting that pointed into it follow the new name instead of going stale.
+    func updateRememberedPaths(from source: URL, to destination: URL) {
+        let old = source.path, new = destination.path
+        func updated(_ url: URL) -> URL {
+            if url.path == old { return URL(fileURLWithPath: new, isDirectory: true) }
+            if url.path.hasPrefix(old + "/") {
+                return URL(fileURLWithPath: new + url.path.dropFirst(old.count), isDirectory: true)
+            }
+            return url
+        }
+        backStack = backStack.map(updated)
+        forwardStack = forwardStack.map(updated)
+        if recentMoveDestinations.contains(where: { updated($0) != $0 }) {
+            recentMoveDestinations = recentMoveDestinations.map(updated)
+            defaults.set(recentMoveDestinations.map(\.path), forKey: Keys.recentMoveDestinations)
+        }
+        if !customLaunchPath.isEmpty {
+            let launch = updated(URL(fileURLWithPath: customLaunchPath, isDirectory: true)).path
+            if launch != customLaunchPath { customLaunchPath = launch }
+        }
     }
 
     func revealInFinder(_ item: FileItem? = nil) {
