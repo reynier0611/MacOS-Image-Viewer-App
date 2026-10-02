@@ -106,12 +106,18 @@ enum Ratings {
 
     /// Formats whose metadata can be rewritten in place without re-compressing.
     private static let writableTypes: [UTType] = [.jpeg, .heic, .heif, .png, .tiff]
+    /// MP4 / M4V / MOV: the rating goes in an embedded XMP box (see `VideoXMP`).
+    private static let videoTypes: [UTType] = [.mpeg4Movie, .quickTimeMovie]
 
     static func canStore(in item: FileItem) -> Bool {
-        guard !item.isDirectory, !item.isVideo, !item.isRaw,
+        guard !item.isDirectory, !item.isRaw,
               let type = UTType(filenameExtension: item.url.pathExtension)
         else { return false }
-        return writableTypes.contains { type.conforms(to: $0) }
+        return (item.isVideo ? videoTypes : writableTypes).contains { type.conforms(to: $0) }
+    }
+
+    private static func isVideo(_ url: URL) -> Bool {
+        UTType(filenameExtension: url.pathExtension)?.conforms(to: .movie) ?? false
     }
 
     static func read(from source: CGImageSource) -> Int? {
@@ -123,13 +129,18 @@ enum Ratings {
     }
 
     static func read(_ url: URL) -> Int? {
-        CGImageSourceCreateWithURL(url as CFURL, nil).flatMap(read(from:))
+        if isVideo(url) { return VideoXMP.readRating(from: url) }
+        return CGImageSourceCreateWithURL(url as CFURL, nil).flatMap(read(from:))
     }
 
-    /// Writes the rating into the file. Pixels and "date modified" are left untouched.
+    /// Writes the rating into the file. Pixels / video data and "date modified" are left untouched.
     static func write(_ rating: Int, to url: URL) throws {
-        guard range.contains(rating),
-              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+        guard range.contains(rating) else { throw ImageEditing.EditError.unsupported(url.lastPathComponent) }
+        if isVideo(url) {
+            try VideoXMP.writeRating(rating, to: url)
+            return
+        }
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let type = CGImageSourceGetType(source)
         else { throw ImageEditing.EditError.unsupported(url.lastPathComponent) }
         let metadata = CGImageMetadataCreateMutable()

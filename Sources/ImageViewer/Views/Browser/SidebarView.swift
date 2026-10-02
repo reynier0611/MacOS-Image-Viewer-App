@@ -153,6 +153,9 @@ struct FolderTreeRow: View {
                 if let item = FileItem(url: url), url.path != FileManager.default.homeDirectoryForCurrentUser.path, url.path != "/" {
                     Divider()
                     Button("Rename…") { model.beginRename(item) }
+                    if !model.isProtectedFolder(url) {
+                        Button("Move to Trash", role: .destructive) { model.moveToTrash(item) }
+                    }
                 }
             }
     }

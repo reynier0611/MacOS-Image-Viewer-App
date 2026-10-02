@@ -44,6 +44,12 @@ struct ContentView: View {
         } message: {
             Text("Creates a folder here and moves \(model.newFolderItemCount == 1 ? "the image" : "the \(model.newFolderItemCount) images") into it.")
         }
+        .alert(model.trashConfirmationTitle, isPresented: $model.isTrashConfirmationPresented) {
+            Button("Move to Trash", role: .destructive) { model.confirmPendingTrash() }
+            Button("Cancel", role: .cancel) { model.pendingTrash = [] }
+        } message: {
+            Text("You can put it back with Edit ▸ Undo (⌘Z), or from the Trash in the Dock.")
+        }
         .alert("Go to Folder", isPresented: $model.isGoToFolderPresented) {
             TextField("Path", text: $model.goToFolderText)
             Button("Go") { model.goToFolder(path: model.goToFolderText) }
@@ -166,13 +172,13 @@ struct MainToolbar: ToolbarContent {
 
         // The rating gets its own section, apart from the image buttons on the right.
         ToolbarItem(placement: .principal) {
-            if model.isViewing, let item = model.currentItem, !item.isVideo {
+            if model.isViewing, let item = model.currentItem {
                 let storable = Ratings.canStore(in: item)
                 RatingControl(rating: model.rating(for: item), compact: true) { model.setRating($0) }
                     .disabled(!storable)
                     .help(storable
                         ? "Rating, saved inside the file (keys 1–5; 0 or ✕ clears; X rejects)"
-                        : "Ratings can't be saved in this file type yet (RAW)")
+                        : "Ratings can't be saved in this file type yet (RAW, and videos other than MP4/MOV)")
             }
         }
 
@@ -250,8 +256,8 @@ struct MainToolbar: ToolbarContent {
                 Button(role: .destructive) { model.moveToTrash() } label: {
                     Label("Move to Trash", systemImage: "trash")
                 }
-                .disabled(model.selectedImages.isEmpty)
-                .help("Move selected images to Trash (⌘⌫). ⌘-click or ⇧-click to select several.")
+                .disabled(model.trashTargets().isEmpty)
+                .help("Move the selected items to the Trash (⌘⌫). ⌘-click or ⇧-click to select several.")
             }
             Menu {
                 ToolsMenuItems()

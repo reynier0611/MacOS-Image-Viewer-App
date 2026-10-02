@@ -70,7 +70,8 @@ struct RatingFileTests {
         }
         #expect(Ratings.canStore(in: item("a.jpg")))
         #expect(Ratings.canStore(in: item("a.heic")))
-        #expect(!Ratings.canStore(in: item("a.mov")))
+        #expect(Ratings.canStore(in: item("a.mov"))) // MP4/MOV hold the rating in an XMP box
+        #expect(!Ratings.canStore(in: item("a.avi")))
         #expect(!Ratings.canStore(in: item("a.dng")))
         #expect(!Ratings.canStore(in: item("a.gif")))
     }

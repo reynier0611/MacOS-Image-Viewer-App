@@ -154,8 +154,11 @@ struct ItemContextMenu: View {
             Button(targets.count == 1 ? "New Folder with This Image…" : "New Folder with \(targets.count) Images…") {
                 model.beginNewFolderWithSelection(item)
             }
+        }
+        let trashTargets = model.trashTargets(for: item)
+        if !trashTargets.isEmpty {
             Divider()
-            Button(targets.count == 1 ? "Move to Trash" : "Move \(targets.count) Images to Trash", role: .destructive) {
+            Button(trashTargets.count == 1 ? "Move to Trash" : "Move \(trashTargets.count) Items to Trash", role: .destructive) {
                 model.moveToTrash(item)
             }
         }

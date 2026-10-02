@@ -51,6 +51,7 @@ enum MediaIndex {
     private static func readVideo(_ url: URL) async -> MediaInfo {
         let asset = AVURLAsset(url: url)
         var info = MediaInfo()
+        info.rating = VideoXMP.readRating(from: url)
         if let item = try? await asset.load(.creationDate) {
             info.captureDate = try? await item.load(.dateValue)
         }

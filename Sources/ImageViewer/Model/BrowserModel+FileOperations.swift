@@ -21,8 +21,52 @@ extension BrowserModel {
         return selectedImages
     }
 
+    /// What Move to Trash acts on: the open image; a folder from the sidebar; the clicked item;
+    /// or everything selected in the grid, folders included. Home, drives and standard folders
+    /// (Desktop, Documents…) are never offered.
+    func trashTargets(for item: FileItem? = nil) -> [FileItem] {
+        if let item, isProtectedFolder(item.url) { return [] }
+        if isViewing { return [item ?? currentItem].compactMap { $0 } }
+        if let item, !selectedURLs.contains(item.url) { return [item] }
+        return gridItems.filter { selectedURLs.contains($0.url) && !isProtectedFolder($0.url) }
+    }
+
+    func isProtectedFolder(_ url: URL) -> Bool {
+        let path = url.path
+        if path == "/" || path == FileManager.default.homeDirectoryForCurrentUser.path { return true }
+        if path.hasPrefix("/Volumes/"), url.pathComponents.count == 3 { return true } // a drive
+        let standard: [FileManager.SearchPathDirectory] = [
+            .desktopDirectory, .documentDirectory, .downloadsDirectory, .picturesDirectory,
+            .moviesDirectory, .musicDirectory, .applicationDirectory, .libraryDirectory,
+        ]
+        return standard.contains { FileManager.default.urls(for: $0, in: .userDomainMask).first?.path == path }
+    }
+
+    /// Moves to the Trash right away, or first asks when folders are involved.
     func moveToTrash(_ item: FileItem? = nil) {
-        trash(fileActionTargets(for: item))
+        let targets = trashTargets(for: item)
+        guard !targets.isEmpty else { return }
+        if targets.contains(where: \.isDirectory) {
+            pendingTrash = targets
+            isTrashConfirmationPresented = true
+        } else {
+            trash(targets)
+        }
+    }
+
+    func confirmPendingTrash() {
+        let items = pendingTrash
+        pendingTrash = []
+        isTrashConfirmationPresented = false
+        trash(items)
+    }
+
+    var trashConfirmationTitle: String {
+        let folders = pendingTrash.filter(\.isDirectory)
+        if pendingTrash.count == 1, let folder = folders.first {
+            return "Move “\(folder.name)” and everything in it to the Trash?"
+        }
+        return "Move \(pendingTrash.count) items, including \(folders.count) folder\(folders.count == 1 ? "" : "s") and everything in \(folders.count == 1 ? "it" : "them"), to the Trash?"
     }
 
     func trash(_ items: [FileItem]) {
@@ -32,11 +76,10 @@ extension BrowserModel {
         var failures: [String] = []
         for item in items {
             do {
-                var resulting: NSURL?
-                try FileManager.default.trashItem(at: item.url, resultingItemURL: &resulting)
+                let resulting = try moveItemToTrash(item.url)
                 ImageLoader.shared.invalidate(item.url)
                 removed.insert(item.url)
-                if let trashed = resulting as URL? {
+                if let trashed = resulting {
                     moved.append((item.url, trashed))
                 }
             } catch {
@@ -44,6 +87,19 @@ extension BrowserModel {
             }
         }
         removeFromList(removed)
+        let trashedFolders = items.filter { $0.isDirectory && removed.contains($0.url) }.map(\.url)
+        if !trashedFolders.isEmpty {
+            folderStructureVersion += 1
+            func isInside(_ url: URL) -> Bool {
+                trashedFolders.contains { url.path == $0.path || url.path.hasPrefix($0.path + "/") }
+            }
+            backStack.removeAll(where: isInside)
+            forwardStack.removeAll(where: isInside)
+            // Trashed the open folder (or one containing it) from the sidebar: step out of it.
+            if let folder, let gone = trashedFolders.first(where: { folder.path == $0.path || folder.path.hasPrefix($0.path + "/") }) {
+                navigate(to: gone.deletingLastPathComponent(), select: nil, recordHistory: false)
+            }
+        }
 
         if !moved.isEmpty {
             undoManager?.registerUndo(withTarget: self) { model in
@@ -54,7 +110,7 @@ extension BrowserModel {
         if removed.count == 1, let name = items.first(where: { removed.contains($0.url) })?.name {
             showToast("Moved “\(name)” to the Trash", canUndo: !moved.isEmpty)
         } else if removed.count > 1 {
-            showToast("Moved \(removed.count) images to the Trash", canUndo: !moved.isEmpty)
+            showToast("Moved \(removed.count) items to the Trash", canUndo: !moved.isEmpty)
         }
         if !failures.isEmpty {
             errorMessage = "Couldn't move \(failures.count) item\(failures.count == 1 ? "" : "s") to the Trash.\n"
@@ -69,6 +125,8 @@ extension BrowserModel {
         let removingViewed = displayedURL.map(urls.contains) ?? false
         images.removeAll { urls.contains($0.url) }
         allImages.removeAll { urls.contains($0.url) }
+        folders.removeAll { urls.contains($0.url) }
+        allFolders.removeAll { urls.contains($0.url) }
 
         if removingViewed, let viewedIndex {
             displayedURL = nil
@@ -110,12 +168,15 @@ extension BrowserModel {
                 MainActor.assumeIsolated { model.trash(restored.compactMap(FileItem.init(url:))) }
             }
             undoManager?.setActionName(restored.count == 1 ? "Move to Trash" : "Move \(restored.count) Items to Trash")
+            if restored.contains(where: { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }) {
+                folderStructureVersion += 1
+            }
             let here = restored.filter(isListed)
             if let first = here.first {
                 load(select: first, viewing: isViewing ? first : nil, alsoSelect: isViewing ? [] : here)
             }
             showToast(
-                restored.count == 1 ? "Restored “\(restored[0].lastPathComponent)”" : "Restored \(restored.count) images",
+                restored.count == 1 ? "Restored “\(restored[0].lastPathComponent)”" : "Restored \(restored.count) items",
                 canUndo: false
             )
         }

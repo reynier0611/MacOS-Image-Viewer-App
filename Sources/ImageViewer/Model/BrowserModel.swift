@@ -32,6 +32,16 @@ final class BrowserModel {
     private(set) var isLoadingFolder = false
     /// Bumped whenever the app creates, renames or removes a folder, so the sidebar tree refreshes.
     var folderStructureVersion = 0
+    /// Items waiting for "Move to Trash?" confirmation (asked whenever folders are involved).
+    var pendingTrash: [FileItem] = []
+    /// Moves one item to the Trash and returns where it went (so Undo can put it back).
+    /// Tests swap this out so they never touch your real Trash.
+    @ObservationIgnored var moveItemToTrash: (URL) throws -> URL? = { url in
+        var resulting: NSURL?
+        try FileManager.default.trashItem(at: url, resultingItemURL: &resulting)
+        return resulting as URL?
+    }
+    var isTrashConfirmationPresented = false
     /// How many photos/videos a recursive scan has found so far (nil when not scanning subfolders).
     private(set) var scanFoundCount: Int?
 

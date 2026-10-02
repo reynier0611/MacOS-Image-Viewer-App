@@ -338,7 +338,7 @@ extension AppModelSuite {
 
         @Test func videosAreSkippedWithoutError() async throws {
             try await open(["a.jpg"])
-            FileManager.default.createFile(atPath: folder.file("clip.mov").path, contents: Data([0, 0, 0, 0]))
+            FileManager.default.createFile(atPath: folder.file("clip.avi").path, contents: Data([0, 0, 0, 0])) // AVI: no rating support
             model.reload()
             try await waitUntil { model.allImages.count == 2 }
             grouped { model.setRating(3, for: model.allImages) }

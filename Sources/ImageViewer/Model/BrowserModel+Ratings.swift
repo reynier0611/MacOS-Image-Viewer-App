@@ -19,7 +19,7 @@ extension BrowserModel {
         let skipped = targets.count - storable.count
         guard !storable.isEmpty else {
             if skipped > 0 {
-                showToast("Ratings can't be saved in \(skipped == 1 ? "this file type" : "these file types") (RAW and video aren't supported yet)", canUndo: false)
+                showToast("Ratings can't be saved in \(skipped == 1 ? "this file type" : "these file types") (RAW, and videos other than MP4/MOV)", canUndo: false)
             }
             return
         }
@@ -27,7 +27,7 @@ extension BrowserModel {
         applyRatings(Dictionary(uniqueKeysWithValues: storable.map { ($0.url, rating) }), previous: previous)
 
         var message = "\(Ratings.stars(rating))" + (storable.count > 1 ? " · \(storable.count) photos" : "")
-        if skipped > 0 { message += " (\(skipped) skipped: RAW/video)" }
+        if skipped > 0 { message += " (\(skipped) skipped: unsupported type)" }
         showToast(message, canUndo: storable.count > 1)
     }
 
