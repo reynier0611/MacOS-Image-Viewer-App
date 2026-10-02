@@ -199,3 +199,26 @@ final class ImageLoader: @unchecked Sendable {
         return (image, Int(image.size.width * image.size.height * 4))
     }
 }
+
+enum Transparency {
+    /// Whether the image actually has see-through pixels. Many PNGs carry an alpha channel but are
+    /// fully opaque, so this samples a small copy instead of trusting the format.
+    static func hasTransparentPixels(_ image: CGImage) -> Bool {
+        switch image.alphaInfo {
+        case .none, .noneSkipFirst, .noneSkipLast: return false
+        default: break
+        }
+        let side = 64
+        var pixels = [UInt8](repeating: 0, count: side * side * 4)
+        guard let context = CGContext(
+            data: &pixels, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return false }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+        return stride(from: 3, to: pixels.count, by: 4).contains { pixels[$0] < 250 }
+    }
+
+    static func hasTransparentPixels(_ image: NSImage) -> Bool {
+        image.cgImage(forProposedRect: nil, context: nil, hints: nil).map(hasTransparentPixels) ?? false
+    }
+}

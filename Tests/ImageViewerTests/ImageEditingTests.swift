@@ -131,3 +131,30 @@ struct HistogramTests {
         #expect(histogram.red.allSatisfy { (0...1).contains($0) })
     }
 }
+
+@Suite("Transparency")
+struct TransparencyTests {
+    @Test func detectsSeeThroughPixelsNotJustAnAlphaChannel() throws {
+        let folder = TempFolder()
+        let clearBackground = Fixtures.image(width: 200, height: 200) { c in
+            c.clear(CGRect(x: 0, y: 0, width: 200, height: 200))
+            c.setFillColor(CGColor(srgbRed: 1, green: 0, blue: 0, alpha: 1))
+            c.fillEllipse(in: CGRect(x: 40, y: 40, width: 120, height: 120))
+        }
+        let oneClearCorner = Fixtures.image(width: 200, height: 200) { c in
+            c.setFillColor(CGColor(srgbRed: 0, green: 0.5, blue: 1, alpha: 1))
+            c.fill(CGRect(x: 0, y: 0, width: 200, height: 200))
+            c.clear(CGRect(x: 0, y: 0, width: 30, height: 30))
+        }
+        // Has an alpha channel (RGBA PNG) but every pixel is opaque.
+        let opaqueRGBA = Fixtures.solid(CGColor(srgbRed: 0.2, green: 0.6, blue: 0.3, alpha: 1), width: 200, height: 200)
+
+        func load(_ image: CGImage, _ name: String, _ type: String = "public.png") -> CGImage {
+            Fixtures.stored(Fixtures.write(image, to: folder.file(name), type: type))
+        }
+        #expect(Transparency.hasTransparentPixels(load(clearBackground, "logo.png")))
+        #expect(Transparency.hasTransparentPixels(load(oneClearCorner, "corner.png")))
+        #expect(!Transparency.hasTransparentPixels(load(opaqueRGBA, "opaque.png")))
+        #expect(!Transparency.hasTransparentPixels(load(clearBackground, "flattened.jpg", "public.jpeg"))) // JPEG has no alpha
+    }
+}

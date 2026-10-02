@@ -171,7 +171,8 @@ struct ViewerView: View {
     }
 }
 
-/// A heavily blurred, lightened copy of the current image behind it. It fills the letterbox
+/// A heavily blurred, lightened copy of the current image behind it. Skipped for images with
+/// transparent areas: there the "blur" would just be a giant copy of the shapes showing through. It fills the letterbox
 /// with the photo's own colors, which is what the Liquid Glass controls refract.
 struct AmbientBackdrop: View {
     let item: FileItem?
@@ -200,11 +201,11 @@ struct AmbientBackdrop: View {
                     return
                 }
                 // A small thumbnail is plenty for a 60pt blur, and cheap to render.
-                if let cached = ThumbnailLoader.shared.latest(for: item.url) {
-                    image = cached
-                } else if let thumbnail = await ThumbnailLoader.shared.thumbnail(for: item, maxPixel: 128) {
-                    image = thumbnail
+                var thumbnail = ThumbnailLoader.shared.latest(for: item.url)
+                if thumbnail == nil {
+                    thumbnail = await ThumbnailLoader.shared.thumbnail(for: item, maxPixel: 128)
                 }
+                image = thumbnail.flatMap { Transparency.hasTransparentPixels($0) ? nil : $0 }
             }
     }
 }
