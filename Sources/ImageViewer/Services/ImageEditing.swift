@@ -74,18 +74,74 @@ enum ImageEditing {
         let current = (props?[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
         let target = change.applied(to: current)
 
-        // Write next to the original (hidden name), then swap it in so a failure never damages the file.
+        try rewrite(url, source: source, type: type, options: [kCGImageDestinationOrientation: target])
+    }
+
+    /// Re-saves a file with changed metadata only (no re-compression of the pixels). Writes next to
+    /// the original under a hidden name, then swaps it in, so a failure never damages the file.
+    static func rewrite(
+        _ url: URL, source: CGImageSource, type: CFString, options: [CFString: Any], keepModificationDate: Bool = false
+    ) throws {
+        let dates = try? FileManager.default.attributesOfItem(atPath: url.path)
         let temp = url.deletingLastPathComponent()
             .appendingPathComponent(".\(UUID().uuidString)-\(url.lastPathComponent)")
         defer { try? FileManager.default.removeItem(at: temp) }
-        guard let destination = CGImageDestinationCreateWithURL(temp as CFURL, type, CGImageSourceGetCount(source), nil) else {
-            throw EditError.unsupported(url.lastPathComponent)
-        }
-        let options = [kCGImageDestinationOrientation: target] as CFDictionary
-        guard CGImageDestinationCopyImageSource(destination, source, options, nil) else {
-            throw EditError.unsupported(url.lastPathComponent)
-        }
+        guard let destination = CGImageDestinationCreateWithURL(temp as CFURL, type, CGImageSourceGetCount(source), nil),
+              CGImageDestinationCopyImageSource(destination, source, options as CFDictionary, nil)
+        else { throw EditError.unsupported(url.lastPathComponent) }
         _ = try FileManager.default.replaceItemAt(url, withItemAt: temp)
+        if keepModificationDate, let modified = dates?[.modificationDate] {
+            try? FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: url.path)
+        }
+    }
+}
+
+// MARK: - Ratings
+
+/// Star ratings stored *in the image file* as the standard XMP "Rating" (0–5, −1 = rejected),
+/// which Lightroom, Bridge, Capture One, digiKam and Windows Explorer also read.
+enum Ratings {
+    static let rejected = -1
+    static let range = -1...5
+
+    /// Formats whose metadata can be rewritten in place without re-compressing.
+    private static let writableTypes: [UTType] = [.jpeg, .heic, .heif, .png, .tiff]
+
+    static func canStore(in item: FileItem) -> Bool {
+        guard !item.isDirectory, !item.isVideo, !item.isRaw,
+              let type = UTType(filenameExtension: item.url.pathExtension)
+        else { return false }
+        return writableTypes.contains { type.conforms(to: $0) }
+    }
+
+    static func read(from source: CGImageSource) -> Int? {
+        guard let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil),
+              let value = CGImageMetadataCopyStringValueWithPath(metadata, nil, "xmp:Rating" as CFString) as String?,
+              let rating = Int(value.trimmingCharacters(in: .whitespaces)) ?? Double(value).map({ Int($0) })
+        else { return nil }
+        return min(max(rating, range.lowerBound), range.upperBound)
+    }
+
+    static func read(_ url: URL) -> Int? {
+        CGImageSourceCreateWithURL(url as CFURL, nil).flatMap(read(from:))
+    }
+
+    /// Writes the rating into the file. Pixels and "date modified" are left untouched.
+    static func write(_ rating: Int, to url: URL) throws {
+        guard range.contains(rating),
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let type = CGImageSourceGetType(source)
+        else { throw ImageEditing.EditError.unsupported(url.lastPathComponent) }
+        let metadata = CGImageMetadataCreateMutable()
+        CGImageMetadataSetValueWithPath(metadata, nil, "xmp:Rating" as CFString, "\(rating)" as CFString)
+        try ImageEditing.rewrite(url, source: source, type: type, options: [
+            kCGImageDestinationMetadata: metadata,
+            kCGImageDestinationMergeMetadata: true, // keep every other tag (EXIF, GPS, orientation…)
+        ], keepModificationDate: true)
+    }
+
+    static func stars(_ rating: Int) -> String {
+        rating == rejected ? "Rejected" : rating == 0 ? "No rating" : String(repeating: "★", count: rating) + String(repeating: "☆", count: 5 - rating)
     }
 }
 

@@ -86,7 +86,7 @@ struct ThumbnailGrid: View {
 
     @ViewBuilder
     private func cell(for item: FileItem, size: CGFloat, layout: Int) -> some View {
-        let base = GridCell(item: item, size: size, isSelected: model.selectedURLs.contains(item.url))
+        let base = GridCell(item: item, size: size, isSelected: model.selectedURLs.contains(item.url), rating: model.rating(for: item))
             .background(GeometryReader { geometry in
                 Color.clear.preference(
                     key: CellFramesKey.self,

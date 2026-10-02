@@ -65,8 +65,13 @@ extension BrowserModel {
         case 115: showFirst() // home
         case 119: showLast() // end
         default:
-            if event.charactersIgnoringModifiers == "f" {
+            let key = event.charactersIgnoringModifiers ?? ""
+            if key == "f" {
                 toggleFullScreen()
+            } else if let stars = Int(key), (0...5).contains(stars) {
+                setRating(stars) // 0 clears; also the number pad
+            } else if key == "x" {
+                toggleReject()
             } else {
                 return false
             }

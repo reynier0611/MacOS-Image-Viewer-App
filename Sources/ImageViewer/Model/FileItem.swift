@@ -51,6 +51,7 @@ enum SortKey: String, CaseIterable, Identifiable {
     case modified = "Date Modified"
     case created = "Date Created"
     case size = "Size"
+    case rating = "Rating"
 
     var id: String { rawValue }
 }

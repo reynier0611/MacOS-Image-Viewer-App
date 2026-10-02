@@ -73,6 +73,11 @@ struct AppCommands: Commands {
         }
 
         CommandMenu("Image") {
+            Menu("Rating") {
+                RatingMenuItems()
+                    .environment(model)
+            }
+            Divider()
             Toggle("Recognize Text", isOn: Binding(
                 get: { model.isTextRecognitionOn },
                 set: { _ in model.toggleTextRecognition() }

@@ -32,6 +32,9 @@ struct FilterPanel: View {
             }
             .pickerStyle(.segmented)
 
+            Picker("Rating", selection: $model.ratingFilter) {
+                ForEach(RatingFilter.allCases) { Text($0.rawValue).tag($0) }
+            }
             Picker("Taken", selection: $model.dateFilter) {
                 ForEach(DateFilter.allCases) { Text($0.rawValue).tag($0) }
             }
@@ -89,6 +92,7 @@ struct FilterStatusBar: View {
         let search = model.searchText.trimmingCharacters(in: .whitespaces)
         if !search.isEmpty { chips.append("“\(search)”") }
         if model.typeFilter != .all { chips.append(model.typeFilter.rawValue) }
+        if model.ratingFilter != .any { chips.append(model.ratingFilter.rawValue) }
         if model.dateFilter == .custom {
             chips.append("\(model.customDateFrom.formatted(date: .abbreviated, time: .omitted)) – \(model.customDateTo.formatted(date: .abbreviated, time: .omitted))")
         } else if model.dateFilter != .any {

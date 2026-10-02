@@ -17,11 +17,13 @@ extension BrowserModel {
         searchText = ""
         typeFilter = .all
         dateFilter = .any
+        ratingFilter = .any
     }
 
     var currentFilter: MediaFilter {
         MediaFilter(
             type: typeFilter,
+            rating: ratingFilter,
             dates: dateFilter == .any ? nil : dateFilter.range(from: customDateFrom, to: customDateTo),
             searchText: searchText
         )
@@ -31,7 +33,7 @@ extension BrowserModel {
     func refilter() {
         let filter = currentFilter
         images = allImages.filter {
-            filter.matches($0, captureDate: captureDate(for: $0), labels: contentLabels[$0.url] ?? [])
+            filter.matches($0, captureDate: captureDate(for: $0), labels: contentLabels[$0.url] ?? [], rating: rating(for: $0))
         }
         folders = allFolders.filter(filter.matchesFolder)
 
@@ -74,9 +76,9 @@ extension BrowserModel {
     func mergeMediaInfo(_ info: [URL: MediaInfo], folder: URL) {
         guard self.folder == folder else { return }
         mediaInfo.merge(info) { $1 }
-        if sortKey == .taken {
+        if sortKey == .taken || sortKey == .rating {
             applySort()
-        } else if dateFilter != .any {
+        } else if dateFilter != .any || ratingFilter != .any {
             refilter()
         }
     }

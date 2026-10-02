@@ -15,6 +15,8 @@ struct Coordinate: Hashable, Sendable {
 struct MediaInfo: Sendable {
     var captureDate: Date?
     var coordinate: Coordinate?
+    /// Star rating stored in the file (XMP), −1 = rejected; nil when the file has none.
+    var rating: Int?
 }
 
 enum MediaIndex {
@@ -27,6 +29,7 @@ enum MediaIndex {
               let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
         else { return MediaInfo() }
         var info = MediaInfo()
+        info.rating = Ratings.read(from: source)
         let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
         let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
         let dateString = (exif[kCGImagePropertyExifDateTimeOriginal] as? String)

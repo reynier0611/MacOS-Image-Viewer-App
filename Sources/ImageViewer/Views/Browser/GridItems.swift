@@ -6,6 +6,7 @@ struct GridCell: View {
     let item: FileItem
     let size: CGFloat
     let isSelected: Bool
+    var rating = 0
 
     var body: some View {
         VStack(spacing: 5) {
@@ -18,6 +19,11 @@ struct GridCell: View {
                         .frame(width: size, height: size)
                 } else {
                     ThumbnailView(item: item, size: size)
+                        .opacity(rating == Ratings.rejected ? 0.4 : 1) // rejects fade back, like Lightroom
+                        .overlay(alignment: .bottom) {
+                            RatingBadge(rating: rating)
+                                .padding(.bottom, 4)
+                        }
                 }
             }
             .padding(6)
@@ -119,6 +125,12 @@ struct ItemContextMenu: View {
             Button("Copy Image") { model.copyImage(item) }
         }
         Button("Copy Path") { model.copyPath(item) }
+        if !item.isDirectory {
+            let targets = model.fileActionTargets(for: item).filter { !$0.isDirectory }
+            Menu(targets.count > 1 ? "Rate \(targets.count) Images" : "Rating") {
+                RatingMenuItems(items: targets)
+            }
+        }
         ShareLink(item: item.url)
         Divider()
         Button("Rename…") { model.beginRename(item) }

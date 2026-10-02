@@ -45,6 +45,11 @@ enum ShortcutCatalog {
             s("⌘A", "Select all lines"),
             s("Esc", "Hide the text"),
         ]),
+        Section(title: "Rating (saved in the file)", shortcuts: [
+            s("1 … 5", "Rate the image or the whole selection"),
+            s("0  or  ✕", "Clear the rating"),
+            s("X", "Reject  /  un-reject"),
+        ]),
         Section(title: "Files", shortcuts: [
             s("⌘⌫", "Move to Trash"),
             s("⌘Z  /  ⇧⌘Z", "Undo  /  redo"),

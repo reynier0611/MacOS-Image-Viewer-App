@@ -63,6 +63,31 @@ enum DateFilter: String, CaseIterable, Identifiable {
     }
 }
 
+enum RatingFilter: String, CaseIterable, Identifiable {
+    case any = "Any Rating"
+    case unrated = "Unrated"
+    case oneOrMore = "★ or more"
+    case twoOrMore = "★★ or more"
+    case threeOrMore = "★★★ or more"
+    case fourOrMore = "★★★★ or more"
+    case five = "★★★★★"
+    case rejected = "Rejected"
+    var id: String { rawValue }
+
+    func matches(_ rating: Int) -> Bool {
+        switch self {
+        case .any: true
+        case .unrated: rating == 0
+        case .oneOrMore: rating >= 1
+        case .twoOrMore: rating >= 2
+        case .threeOrMore: rating >= 3
+        case .fourOrMore: rating >= 4
+        case .five: rating == 5
+        case .rejected: rating == Ratings.rejected
+        }
+    }
+}
+
 /// Where the app starts when opened on its own (not by opening a file or folder).
 enum LaunchFolder: String, CaseIterable, Identifiable {
     case home = "Home"
@@ -94,19 +119,22 @@ struct Toast: Identifiable, Equatable {
 /// The search and filter rules, independent of app state so they can be tested directly.
 struct MediaFilter {
     var type: MediaTypeFilter = .all
+    var rating: RatingFilter = .any
     /// Allowed "date taken" range; nil means any date.
     var dates: ClosedRange<Date>?
     /// Lowercased search words; every word must match.
     var tokens: [String] = []
 
-    init(type: MediaTypeFilter = .all, dates: ClosedRange<Date>? = nil, searchText: String = "") {
+    init(type: MediaTypeFilter = .all, rating: RatingFilter = .any, dates: ClosedRange<Date>? = nil, searchText: String = "") {
         self.type = type
+        self.rating = rating
         self.dates = dates
         tokens = searchText.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
     }
 
     /// Every word must appear in the file name or in something recognized in the photo.
-    func matches(_ item: FileItem, captureDate: Date, labels: [String]) -> Bool {
+    func matches(_ item: FileItem, captureDate: Date, labels: [String], rating: Int = 0) -> Bool {
+        guard self.rating.matches(rating) else { return false }
         switch type {
         case .all: break
         case .photos: if item.isVideo { return false }

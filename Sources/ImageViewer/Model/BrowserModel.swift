@@ -83,6 +83,7 @@ final class BrowserModel {
     }
     var typeFilter: MediaTypeFilter = .all { didSet { refilter() } }
     var dateFilter: DateFilter = .any { didSet { refilter() } }
+    var ratingFilter: RatingFilter = .any { didSet { refilter() } }
     var customDateFrom = Calendar.current.date(byAdding: .month, value: -1, to: Date())! {
         didSet { if dateFilter == .custom { refilter() } }
     }
@@ -90,7 +91,7 @@ final class BrowserModel {
         didSet { if dateFilter == .custom { refilter() } }
     }
 
-    var hasActiveFilters: Bool { typeFilter != .all || dateFilter != .any }
+    var hasActiveFilters: Bool { typeFilter != .all || dateFilter != .any || ratingFilter != .any }
     var isFiltering: Bool { hasActiveFilters || !searchText.trimmingCharacters(in: .whitespaces).isEmpty }
     var isAnalyzingContent: Bool { contentAnalysisDone < contentAnalysisTotal }
 
@@ -165,6 +166,8 @@ final class BrowserModel {
     @ObservationIgnored var imageTask: Task<Void, Never>?
     @ObservationIgnored var indexTask: Task<Void, Never>?
     @ObservationIgnored var textTask: Task<Void, Never>?
+    /// Rating writes run one after another, in the order they were requested.
+    @ObservationIgnored var ratingWrites: Task<Void, Never>?
     @ObservationIgnored var recognizedURL: URL?
     @ObservationIgnored var textCache: [URL: [RecognizedLine]] = [:]
     @ObservationIgnored var analysisTask: Task<Void, Never>?
@@ -485,6 +488,9 @@ final class BrowserModel {
                 if x.created != y.created { return x.created < y.created }
             case .size:
                 if x.size != y.size { return x.size < y.size }
+            case .rating:
+                let rx = rating(for: x), ry = rating(for: y)
+                if rx != ry { return rx < ry }
             }
             return a.name.localizedStandardCompare(b.name) == .orderedAscending
         }

@@ -11,7 +11,8 @@ A native macOS image viewer and browser (SwiftUI, macOS 14 Sonoma or later, Appl
 - Select several images in the grid by dragging a rectangle over them (the grid scrolls when you reach the top or bottom edge), ⌘-click, ⇧-click or ⌘A.
 - Move the selection to another folder: drag it onto a folder tile, a sidebar folder or a folder in the path bar. You can also right-click ▸ **Move to** (subfolders, the enclosing folder, recent destinations, or Choose Folder…) or use **New Folder with Selection** (⌃⌘N). A name clash never overwrites: the incoming file becomes “name 2.jpg”.
 - Move the selection to the Trash (⌘⌫). Undo (⌘Z) reverses any move or trash, including a whole batch. Also Rename, Copy Image, Copy Path, Reveal in Finder, Open in Preview, and Share/AirDrop.
-- Sort by name, date taken, date modified/created or size. Changes made to the folder outside the app show up automatically.
+- **Star ratings saved inside the photo**: press 1–5 (0 clears, X rejects) on the open image or a whole selection, or use the stars in the inspector or the Rating menus. The rating is written into the file itself as the standard XMP Rating that Lightroom, Bridge, Capture One, digiKam and Windows Explorer read, so it travels with the file. Pixels and "date modified" are untouched, and Undo works. Works for JPEG, HEIC, PNG and TIFF (not yet RAW or video). Thumbnails show the stars, rejected photos are dimmed, and you can filter and sort by rating.
+- Sort by name, date taken, date modified/created, size or rating. Changes made to the folder outside the app show up automatically.
 - **Search** (toolbar) matches file names *and what's in the photo*, like "beach", "dog" or "sky". Recognition runs on this Mac with Apple's Vision framework and is cached, so each photo is analyzed once. **Filter** by type (photos, videos, RAW) and by date taken (today, last 7/30 days, this year, last year, or a custom range).
 - **Rotate and flip** without losing quality (⌘L / ⌘R). Only the file's orientation tag changes, so pixels are never re-compressed. Works on JPEG, HEIC, PNG and TIFF, one image or a whole selection, with undo. Camera RAW files can't be rotated in place.
 - **Find Duplicates** (⌥⌘D) finds identical copies and visually similar photos (Strict / Normal / Loose), suggests the best copy, and moves the rest to the Trash after you review them.
@@ -86,6 +87,7 @@ The first time you browse Desktop, Documents, Downloads or an external drive, ma
 | ⌘Z | Undo trash / rename |
 | ⇧⌘C / ⌥⌘C | Copy image / copy path |
 | ⌥⌘R | Reveal in Finder |
+| 1–5 / 0 / X | Rate / clear / reject (saved in the file) |
 | ⌘T | Recognize text (select lines, ⌘C to copy) |
 | ⌘L / ⌘R | Rotate left / right |
 | ⇧⌘R | Batch rename… |

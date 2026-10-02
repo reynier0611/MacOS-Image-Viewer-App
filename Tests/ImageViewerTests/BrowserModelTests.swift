@@ -270,4 +270,80 @@ struct BrowserModelTests {
         #expect(model.folder?.lastPathComponent == "Inner")
         #expect(model.folder?.deletingLastPathComponent().lastPathComponent == "New")
     }
+
+    // MARK: Ratings
+
+    @Test func ratingTheSelectionWritesTheFilesAndUndoes() async throws {
+        try await open(["a.jpg", "b.jpg", "c.jpg"])
+        model.click(model.images[0], modifiers: [])
+        model.click(model.images[1], modifiers: .command)
+
+        grouped { model.setRating(4) }
+        #expect(model.rating(for: model.images[0]) == 4) // on screen immediately
+        await model.finishRatingWrites()
+        #expect(Ratings.read(folder.file("a.jpg")) == 4)
+        #expect(Ratings.read(folder.file("b.jpg")) == 4)
+        #expect(Ratings.read(folder.file("c.jpg")) == nil)
+
+        undoLastAction()
+        await model.finishRatingWrites()
+        #expect(Ratings.read(folder.file("a.jpg")) == 0)
+        #expect(model.rating(for: model.images[0]) == 0)
+    }
+
+    @Test func numberKeysAndXRateTheOpenImage() async throws {
+        try await open(["a.jpg", "b.jpg"])
+        model.openImage(at: 0)
+        defer { model.closeViewer() }
+        let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        func press(_ key: String, code: UInt16) -> Bool {
+            model.handleKey(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+                context: nil, characters: key, charactersIgnoringModifiers: key, isARepeat: false, keyCode: code
+            )!)
+        }
+
+        grouped { #expect(press("5", code: 23)) }
+        #expect(model.rating(for: model.images[0]) == 5)
+        grouped { #expect(press("x", code: 7)) }
+        #expect(model.rating(for: model.images[0]) == Ratings.rejected)
+        grouped { #expect(press("x", code: 7)) } // X again un-rejects
+        #expect(model.rating(for: model.images[0]) == 0)
+        await model.finishRatingWrites()
+        #expect(Ratings.read(folder.file("a.jpg")) == 0)
+        #expect(Ratings.read(folder.file("b.jpg")) == nil)
+    }
+
+    @Test func existingRatingsAreReadAndCanBeFilteredAndSorted() async throws {
+        let names = ["one.jpg", "three.jpg", "none.jpg", "rejected.jpg"]
+        for name in names { Fixtures.write(Fixtures.solid(CGColor(gray: 0.5, alpha: 1)), to: folder.file(name)) }
+        try Ratings.write(1, to: folder.file("one.jpg"))
+        try Ratings.write(3, to: folder.file("three.jpg"))
+        try Ratings.write(Ratings.rejected, to: folder.file("rejected.jpg"))
+        model.navigate(to: folder.url)
+        try await waitUntil { model.allImages.count == 4 && model.allImages.allSatisfy { model.mediaInfo[$0.url] != nil } }
+        defer { model.ratingFilter = .any; model.sortKey = .name; model.sortAscending = true }
+
+        model.ratingFilter = .oneOrMore
+        #expect(Set(model.images.map(\.name)) == ["one.jpg", "three.jpg"])
+        model.ratingFilter = .rejected
+        #expect(model.images.map(\.name) == ["rejected.jpg"])
+        model.ratingFilter = .any
+
+        model.sortKey = .rating
+        model.sortAscending = false
+        #expect(model.images.map(\.name) == ["three.jpg", "one.jpg", "none.jpg", "rejected.jpg"])
+    }
+
+    @Test func videosAreSkippedWithoutError() async throws {
+        try await open(["a.jpg"])
+        FileManager.default.createFile(atPath: folder.file("clip.mov").path, contents: Data([0, 0, 0, 0]))
+        model.reload()
+        try await waitUntil { model.allImages.count == 2 }
+        grouped { model.setRating(3, for: model.allImages) }
+        await model.finishRatingWrites()
+        #expect(model.errorMessage == nil)
+        #expect(Ratings.read(folder.file("a.jpg")) == 3)
+        #expect(model.toast?.message.contains("1 skipped") == true)
+    }
 }

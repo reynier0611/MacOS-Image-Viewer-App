@@ -163,6 +163,18 @@ struct MainToolbar: ToolbarContent {
             }
         }
 
+        // The rating gets its own section, apart from the image buttons on the right.
+        ToolbarItem(placement: .principal) {
+            if model.isViewing, let item = model.currentItem, !item.isVideo {
+                let storable = Ratings.canStore(in: item)
+                RatingControl(rating: model.rating(for: item), compact: true) { model.setRating($0) }
+                    .disabled(!storable)
+                    .help(storable
+                        ? "Rating, saved inside the file (keys 1–5; 0 or ✕ clears; X rejects)"
+                        : "Ratings can't be saved in this file type yet (RAW)")
+            }
+        }
+
         ToolbarItemGroup(placement: .primaryAction) {
             if model.isViewing {
                 ControlGroup {
