@@ -30,6 +30,8 @@ final class BrowserModel {
     var contentAnalysisTotal = 0
     private(set) var folderError: String?
     private(set) var isLoadingFolder = false
+    /// Bumped whenever the app creates, renames or removes a folder, so the sidebar tree refreshes.
+    var folderStructureVersion = 0
     /// How many photos/videos a recursive scan has found so far (nil when not scanning subfolders).
     private(set) var scanFoundCount: Int?
 

@@ -314,6 +314,7 @@ extension BrowserModel {
 
     func createFolder(_ url: URL) throws {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+        folderStructureVersion += 1
         undoManager?.registerUndo(withTarget: self) { model in
             MainActor.assumeIsolated { model.removeFolderIfEmpty(url) }
         }
@@ -322,6 +323,7 @@ extension BrowserModel {
     func removeFolderIfEmpty(_ url: URL) {
         let contents = (try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []
         guard contents.allSatisfy({ $0 == ".DS_Store" }) else { return }
+        defer { folderStructureVersion += 1 }
         do {
             try FileManager.default.removeItem(at: url)
         } catch {
@@ -389,7 +391,15 @@ extension BrowserModel {
             // Same pixels, new name: keep showing the current image without a reload.
             displayedURL = destination
         }
-        load(select: destination, viewing: wasViewing ? destination : nil)
+        if let folder, folder.path == source.path || folder.path.hasPrefix(source.path + "/") {
+            // Renamed the open folder or one containing it (possible from the sidebar): follow it.
+            navigate(to: URL(fileURLWithPath: destination.path + folder.path.dropFirst(source.path.count), isDirectory: true), recordHistory: false)
+        } else {
+            load(select: destination, viewing: wasViewing ? destination : nil)
+        }
+        if (try? destination.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+            folderStructureVersion += 1
+        }
         undoManager?.registerUndo(withTarget: self) { model in
             MainActor.assumeIsolated { model.rename(from: destination, to: source) }
         }

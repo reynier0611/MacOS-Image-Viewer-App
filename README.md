@@ -3,7 +3,7 @@
 A native macOS image viewer and browser (SwiftUI, macOS 14 Sonoma or later, Apple Silicon and Intel). Always uses the light theme, even when the Mac is in Dark Mode. On macOS 26 (Tahoe) the floating controls use Liquid Glass; older macOS versions get a frosted-glass look instead.
 
 - Opens every image format macOS can decode (JPEG, PNG, HEIC, WebP, AVIF, JPEG XL, TIFF, GIF, BMP, PSD, EXR, SVG, and camera RAW such as CR2/CR3, NEF, ARW, DNG, RAF) and plays videos (MOV, MP4, M4V; H.264, HEVC, ProRes). Space plays/pauses a video.
-- Browse any folder as a grid of thumbnails, with a sidebar (Favorites and drives) and a clickable path bar. Opened on its own, the app always starts in your home folder; it doesn't remember where you were.
+- Browse any folder as a grid of thumbnails. The sidebar is a **folder tree** (Home, iCloud Drive and every drive): expand folders with ▸ to see subfolders, click one to open it. The tree opens itself to whatever folder you're in. Drop photos on a tree folder to move them there; right-click for Rename and Reveal in Finder. There's also a clickable path bar. Opened on its own, the app always starts in your home folder; it doesn't remember where you were.
 - Open an image to see it as large as the window allows. Use ← → to go through the folder, and Esc to go back to the grid.
 - Zoom (pinch, ⌘= / ⌘-, double-click for 100%), drag to pan, full screen with **F**.
 - In the viewer, the arrows and info float over the image and fade out when the mouse rests. The filmstrip stays hidden, so the whole image is visible, until you move the pointer to the bottom edge.
