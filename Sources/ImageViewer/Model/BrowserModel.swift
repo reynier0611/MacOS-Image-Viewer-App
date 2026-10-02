@@ -19,9 +19,27 @@ final class BrowserModel {
     /// these lists after the search and filters, and are what the grid and viewer show.
     var allFolders: [FileItem] = []
     var allImages: [FileItem] = []
-    var folders: [FileItem] = []
+    var folders: [FileItem] = [] { didSet { listingChanged() } }
     /// Images and videos (everything the viewer can show), in sort order, after filters.
-    var images: [FileItem] = []
+    var images: [FileItem] = [] { didSet { listingChanged() } }
+
+    // Derived from `folders`/`images` once per change rather than on every redraw: with tens of
+    // thousands of items, rescanning them on each click or arrow key caused visible hitches.
+    /// What the grid shows: folders first, then images.
+    private(set) var gridItems: [FileItem] = []
+    /// Changes whenever the listing does (cheap stand-in for comparing every item).
+    private(set) var listingVersion = 0
+    private(set) var videoCount = 0
+    @ObservationIgnored private(set) var imageIndex: [URL: Int] = [:]
+    @ObservationIgnored private(set) var gridIndex: [URL: Int] = [:]
+
+    private func listingChanged() {
+        gridItems = folders + images
+        imageIndex = Dictionary(images.enumerated().map { ($1.url, $0) }, uniquingKeysWith: { first, _ in first })
+        gridIndex = Dictionary(gridItems.enumerated().map { ($1.url, $0) }, uniquingKeysWith: { first, _ in first })
+        videoCount = images.reduce(0) { $0 + ($1.isVideo ? 1 : 0) }
+        listingVersion &+= 1
+    }
     /// Date taken and location per file, filled in the background after a folder loads.
     var mediaInfo: [URL: MediaInfo] = [:]
     /// On-device recognition labels per photo, computed when a search needs them.
@@ -244,7 +262,6 @@ final class BrowserModel {
     // MARK: Derived state
 
     var isViewing: Bool { viewerIndex != nil }
-    var gridItems: [FileItem] { folders + images }
     var canGoBack: Bool { !backStack.isEmpty }
     var canGoForward: Bool { !forwardStack.isEmpty }
     var canGoUp: Bool { folder.map { $0.path != "/" } ?? false }
@@ -255,13 +272,23 @@ final class BrowserModel {
     }
 
     var selectedItem: FileItem? {
-        guard let selection else { return nil }
-        return folders.first { $0.url == selection } ?? images.first { $0.url == selection }
+        guard let selection, let index = gridIndex[selection] else { return nil }
+        return gridItems[index]
     }
 
     /// Selected images in grid order (folders are never trashed).
     var selectedImages: [FileItem] {
-        images.filter { selectedURLs.contains($0.url) }
+        // Look up the (usually few) selected items instead of scanning every image.
+        selectedURLs.compactMap { imageIndex[$0] }.sorted().map { images[$0] }
+    }
+
+    var hasSelectedImages: Bool {
+        selectedURLs.contains { imageIndex[$0] != nil }
+    }
+
+    /// Selected items (folders and images) in grid order.
+    var selectedGridItems: [FileItem] {
+        selectedURLs.compactMap { gridIndex[$0] }.sorted().map { gridItems[$0] }
     }
 
     /// What the inspector describes: the open image, or the grid selection.

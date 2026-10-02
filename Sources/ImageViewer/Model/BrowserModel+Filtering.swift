@@ -59,15 +59,26 @@ extension BrowserModel {
         let pending = allImages.filter { mediaInfo[$0.url] == nil }
         guard !pending.isEmpty, let folder else { return }
         indexTask?.cancel()
+        // Several workers read headers in parallel (it's mostly waiting on the disk); results
+        // are merged in batches so the map, date filters and sorting fill in as they arrive.
+        let workers = max(2, min(8, ProcessInfo.processInfo.activeProcessorCount / 2))
+        let chunkSize = (pending.count + workers - 1) / workers
+        let chunks = stride(from: 0, to: pending.count, by: chunkSize).map { Array(pending[$0..<min($0 + chunkSize, pending.count)]) }
         indexTask = Task.detached(priority: .utility) { [weak self] in
-            var batch: [URL: MediaInfo] = [:]
-            for (index, item) in pending.enumerated() {
-                if Task.isCancelled { return }
-                batch[item.url] = await MediaIndex.read(item)
-                if batch.count >= 100 || index == pending.count - 1 {
-                    let ready = batch
-                    batch = [:]
-                    await self?.mergeMediaInfo(ready, folder: folder)
+            await withTaskGroup(of: Void.self) { group in
+                for chunk in chunks {
+                    group.addTask {
+                        var batch: [URL: MediaInfo] = [:]
+                        for (index, item) in chunk.enumerated() {
+                            if Task.isCancelled { return }
+                            batch[item.url] = await MediaIndex.read(item)
+                            if batch.count >= 150 || index == chunk.count - 1 {
+                                let ready = batch
+                                batch = [:]
+                                await self?.mergeMediaInfo(ready, folder: folder)
+                            }
+                        }
+                    }
                 }
             }
         }

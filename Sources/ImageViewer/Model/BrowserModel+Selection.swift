@@ -11,7 +11,7 @@ extension BrowserModel {
     func moveSelection(by delta: Int) {
         let items = gridItems
         guard !items.isEmpty else { return }
-        guard let current = selection, let index = items.firstIndex(where: { $0.url == current }) else {
+        guard let current = selection, let index = gridIndex[current] else {
             selection = items.first?.url
             return
         }
@@ -42,8 +42,8 @@ extension BrowserModel {
         let items = gridItems
         if modifiers.contains(.shift),
            let anchor = selection,
-           let from = items.firstIndex(where: { $0.url == anchor }),
-           let to = items.firstIndex(where: { $0.url == item.url }) {
+           let from = gridIndex[anchor],
+           let to = gridIndex[item.url] {
             // Additive, so ⌘-picked images elsewhere aren't lost when you ⇧-click a range.
             selectedURLs.formUnion(items[min(from, to)...max(from, to)].map(\.url))
         } else if modifiers.contains(.command) {

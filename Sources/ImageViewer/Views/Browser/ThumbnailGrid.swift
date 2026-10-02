@@ -32,7 +32,7 @@ struct ThumbnailGrid: View {
         GeometryReader { geometry in
             let columns = max(1, Int((geometry.size.width - padding * 2 + spacing) / (cellWidth + spacing)))
             // Changes whenever cell positions could change, so stale remembered frames get replaced.
-            let layout = Hasher.hash(columns, size, model.gridItems.map(\.url))
+            let layout = Hasher.hash(columns, size, model.listingVersion)
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVGrid(
@@ -110,6 +110,7 @@ struct ThumbnailGrid: View {
                 model.beginDrag(item)
                 return NSItemProvider(item: item.url.path as NSString, typeIdentifier: UTType.imageViewerSelection.identifier)
             } preview: {
+                // Built for every visible cell on every update, so it must stay cheap.
                 DragPreview(item: item, count: model.selectedURLs.contains(item.url) ? max(1, model.selectedImages.count) : 1)
             }
         }

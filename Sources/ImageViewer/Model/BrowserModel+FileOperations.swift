@@ -28,7 +28,7 @@ extension BrowserModel {
         if let item, isProtectedFolder(item.url) { return [] }
         if isViewing { return [item ?? currentItem].compactMap { $0 } }
         if let item, !selectedURLs.contains(item.url) { return [item] }
-        return gridItems.filter { selectedURLs.contains($0.url) && !isProtectedFolder($0.url) }
+        return selectedGridItems.filter { !isProtectedFolder($0.url) }
     }
 
     func isProtectedFolder(_ url: URL) -> Bool {
@@ -120,7 +120,7 @@ extension BrowserModel {
 
     func removeFromList(_ urls: Set<URL>) {
         guard !urls.isEmpty else { return }
-        let firstGridIndex = gridItems.firstIndex { urls.contains($0.url) }
+        let firstGridIndex = urls.compactMap { gridIndex[$0] }.min()
         let viewedIndex = displayedURL.flatMap { url in images.firstIndex { $0.url == url } }
         let removingViewed = displayedURL.map(urls.contains) ?? false
         images.removeAll { urls.contains($0.url) }

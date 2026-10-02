@@ -84,7 +84,7 @@ struct ContentView: View {
         if model.isFiltering {
             return (model.showsAllSubfolders ? "All subfolders · " : "") + "Showing \(model.images.count) of \(model.allImages.count)"
         }
-        let videoCount = model.images.filter(\.isVideo).count
+        let videoCount = model.videoCount
         let imageCount = model.images.count - videoCount
         var parts = ["\(imageCount) image\(imageCount == 1 ? "" : "s")"]
         if videoCount > 0 {
@@ -257,7 +257,7 @@ struct MainToolbar: ToolbarContent {
                 } label: {
                     Label("Move to Folder", systemImage: "arrowshape.turn.up.right")
                 }
-                .disabled(model.selectedImages.isEmpty)
+                .disabled(!model.hasSelectedImages)
                 .help("Move selected images to another folder (⇧⌘M). You can also drag them onto a folder.")
                 Button(role: .destructive) { model.moveToTrash() } label: {
                     Label("Move to Trash", systemImage: "trash")
