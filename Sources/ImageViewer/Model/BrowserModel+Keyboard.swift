@@ -42,6 +42,12 @@ extension BrowserModel {
         }
         guard modifiers.isEmpty else { return false }
 
+        // Esc / Space / Return would close the viewer and lose the adjustments.
+        if isAdjusting, [53, 49, 36, 76].contains(event.keyCode) {
+            if hasUnsavedAdjustments { remindToSaveAdjustments() } else { endAdjusting() }
+            return true
+        }
+
         switch event.keyCode {
         case 123: step(-1) // ←
         case 124: step(1) // →

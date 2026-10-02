@@ -51,13 +51,30 @@ extension BrowserModel {
         }
         undoManager?.setActionName("Rating")
 
-        let earlier = ratingWrites
-        ratingWrites = Task { [weak self] in
+        enqueueMetadataWrite(Array(ratings.keys), what: "rating") { url in
+            try Ratings.write(ratings[url]!, to: url)
+        } onFailure: { model, failed in
+            for url in failed {
+                model.mediaInfo[url, default: MediaInfo()].rating = previous[url] ?? 0
+            }
+            model.ratingsChanged()
+        }
+    }
+
+    /// Runs `write` for each file in the background, after any earlier metadata writes (two writes
+    /// to the same file must never overlap). Failed files are reported and passed to `onFailure`.
+    func enqueueMetadataWrite(
+        _ urls: [URL], what: String,
+        write: @escaping @Sendable (URL) throws -> Void,
+        onFailure: @escaping @MainActor (BrowserModel, [URL]) -> Void
+    ) {
+        let earlier = metadataWrites
+        metadataWrites = Task { [weak self] in
             await earlier?.value
             let failures = await Task.detached(priority: .userInitiated) {
-                ratings.compactMap { url, rating -> (URL, String)? in
+                urls.compactMap { url -> (URL, String)? in
                     do {
-                        try Ratings.write(rating, to: url)
+                        try write(url)
                         return nil
                     } catch {
                         return (url, error.localizedDescription)
@@ -65,21 +82,18 @@ extension BrowserModel {
                 }
             }.value
             guard let self, !failures.isEmpty else { return }
-            for (url, _) in failures {
-                self.mediaInfo[url, default: MediaInfo()].rating = previous[url] ?? 0
-            }
-            self.ratingsChanged()
-            self.errorMessage = "Couldn't save the rating in \(failures.count) file\(failures.count == 1 ? "" : "s").\n"
+            onFailure(self, failures.map(\.0))
+            self.errorMessage = "Couldn't save the \(what) in \(failures.count) file\(failures.count == 1 ? "" : "s").\n"
                 + failures.map { "“\($0.0.lastPathComponent)”: \($0.1)" }.joined(separator: "\n")
         }
     }
 
-    /// Waits until every requested rating has been written to disk (used by tests).
-    func finishRatingWrites() async {
-        await ratingWrites?.value
+    /// Waits until every requested rating, tag and note has been written to disk (used by tests).
+    func finishMetadataWrites() async {
+        await metadataWrites?.value
     }
 
-    private func ratingsChanged() {
+    func ratingsChanged() {
         if sortKey == .rating {
             applySort()
         } else if ratingFilter != .any {

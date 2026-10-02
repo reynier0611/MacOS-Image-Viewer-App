@@ -13,6 +13,16 @@ extension BrowserModel {
         mediaInfo[item.url]?.captureDate ?? min(item.created, item.modified)
     }
 
+    /// What search looks in besides the name: things recognized in the photo, its tags and its note.
+    func searchableWords(for item: FileItem) -> [String] {
+        var words = contentLabels[item.url] ?? []
+        if let annotations = mediaInfo[item.url]?.annotations {
+            words += annotations.tags.map { $0.lowercased() }
+            if !annotations.note.isEmpty { words.append(annotations.note.lowercased()) }
+        }
+        return words
+    }
+
     func clearFilters() {
         searchText = ""
         typeFilter = .all
@@ -33,7 +43,7 @@ extension BrowserModel {
     func refilter() {
         let filter = currentFilter
         images = allImages.filter {
-            filter.matches($0, captureDate: captureDate(for: $0), labels: contentLabels[$0.url] ?? [], rating: rating(for: $0))
+            filter.matches($0, captureDate: captureDate(for: $0), labels: searchableWords(for: $0), rating: rating(for: $0))
         }
         folders = showsAllSubfolders ? [] : allFolders.filter(filter.matchesFolder)
 

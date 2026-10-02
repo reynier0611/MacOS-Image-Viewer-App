@@ -77,18 +77,54 @@ enum ImageEditing {
         try rewrite(url, source: source, type: type, options: [kCGImageDestinationOrientation: target])
     }
 
+    /// Changes the image's metadata, keeping every other tag (EXIF, GPS, orientation…). Pixels and
+    /// "date modified" are left untouched. `change` gets either an empty set of values to merge in
+    /// (`merging` true: an empty value clears a field) or a full copy of the metadata to edit.
+    static func updateMetadata(of url: URL, _ change: (_ metadata: CGMutableImageMetadata, _ merging: Bool) -> Bool) throws {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let type = CGImageSourceGetType(source)
+        else { throw EditError.unsupported(url.lastPathComponent) }
+        if UTType(type as String) == .png {
+            // ImageIO's in-place copy can't add XMP to a PNG that has none, and can't clear values in
+            // one that does. PNG is lossless, so re-encoding the pixels with new metadata is exact.
+            let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil)
+                .flatMap { CGImageMetadataCreateMutableCopy($0) } ?? CGImageMetadataCreateMutable()
+            guard change(metadata, false), let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+            else { throw EditError.unsupported(url.lastPathComponent) }
+            try replace(url, keepModificationDate: true) { temp in
+                guard let destination = CGImageDestinationCreateWithURL(temp as CFURL, type, 1, nil) else { return false }
+                CGImageDestinationAddImageAndMetadata(destination, image, metadata, nil)
+                return CGImageDestinationFinalize(destination)
+            }
+            return
+        }
+        let metadata = CGImageMetadataCreateMutable()
+        guard change(metadata, true) else { throw EditError.unsupported(url.lastPathComponent) }
+        try rewrite(url, source: source, type: type, options: [
+            kCGImageDestinationMetadata: metadata,
+            kCGImageDestinationMergeMetadata: true,
+        ], keepModificationDate: true)
+    }
+
     /// Re-saves a file with changed metadata only (no re-compression of the pixels). Writes next to
     /// the original under a hidden name, then swaps it in, so a failure never damages the file.
     static func rewrite(
         _ url: URL, source: CGImageSource, type: CFString, options: [CFString: Any], keepModificationDate: Bool = false
     ) throws {
+        try replace(url, keepModificationDate: keepModificationDate) { temp in
+            guard let destination = CGImageDestinationCreateWithURL(temp as CFURL, type, CGImageSourceGetCount(source), nil)
+            else { return false }
+            return CGImageDestinationCopyImageSource(destination, source, options as CFDictionary, nil)
+        }
+    }
+
+    /// Has `write` produce the new file under a hidden name next to `url`, then swaps it in.
+    private static func replace(_ url: URL, keepModificationDate: Bool, write: (URL) -> Bool) throws {
         let dates = try? FileManager.default.attributesOfItem(atPath: url.path)
         let temp = url.deletingLastPathComponent()
             .appendingPathComponent(".\(UUID().uuidString)-\(url.lastPathComponent)")
         defer { try? FileManager.default.removeItem(at: temp) }
-        guard let destination = CGImageDestinationCreateWithURL(temp as CFURL, type, CGImageSourceGetCount(source), nil),
-              CGImageDestinationCopyImageSource(destination, source, options as CFDictionary, nil)
-        else { throw EditError.unsupported(url.lastPathComponent) }
+        guard write(temp) else { throw EditError.unsupported(url.lastPathComponent) }
         _ = try FileManager.default.replaceItemAt(url, withItemAt: temp)
         if keepModificationDate, let modified = dates?[.modificationDate] {
             try? FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: url.path)
@@ -140,15 +176,9 @@ enum Ratings {
             try VideoXMP.writeRating(rating, to: url)
             return
         }
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let type = CGImageSourceGetType(source)
-        else { throw ImageEditing.EditError.unsupported(url.lastPathComponent) }
-        let metadata = CGImageMetadataCreateMutable()
-        CGImageMetadataSetValueWithPath(metadata, nil, "xmp:Rating" as CFString, "\(rating)" as CFString)
-        try ImageEditing.rewrite(url, source: source, type: type, options: [
-            kCGImageDestinationMetadata: metadata,
-            kCGImageDestinationMergeMetadata: true, // keep every other tag (EXIF, GPS, orientation…)
-        ], keepModificationDate: true)
+        try ImageEditing.updateMetadata(of: url) { metadata, _ in
+            CGImageMetadataSetValueWithPath(metadata, nil, "xmp:Rating" as CFString, "\(rating)" as CFString)
+        }
     }
 
     static func stars(_ rating: Int) -> String {

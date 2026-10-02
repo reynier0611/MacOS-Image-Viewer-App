@@ -43,6 +43,15 @@ struct ViewerView: View {
                 edgeButton("chevron.right", enabled: (model.viewerIndex ?? 0) < model.images.count - 1) { model.step(1) }
             }
             .overlay(alignment: .topLeading) { infoPill }
+            .overlay(alignment: .trailing) {
+                if model.isAdjusting {
+                    AdjustPanel()
+                        .padding(.trailing, 16)
+                        .onHover { isPointerOverControls = $0 }
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
+            .animation(.easeOut(duration: 0.2), value: model.isAdjusting)
             .overlay(alignment: .top) {
                 if model.isTextRecognitionOn {
                     TextRecognitionBar()
@@ -93,7 +102,7 @@ struct ViewerView: View {
                 .padding(.bottom, hasFilmstrip ? 104 : 0)
         } else {
             ZoomableImageView(
-                image: model.currentImage,
+                image: model.isShowingOriginal ? model.currentImage : (model.adjustmentPreview ?? model.currentImage),
                 imageURL: model.displayedURL,
                 zoomRequest: model.zoomRequest,
                 enlargeSmallImages: model.enlargeSmallImages,

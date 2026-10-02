@@ -17,6 +17,8 @@ struct MediaInfo: Sendable {
     var coordinate: Coordinate?
     /// Star rating stored in the file (XMP), −1 = rejected; nil when the file has none.
     var rating: Int?
+    /// Tags and note stored in the file (see `Annotations`).
+    var annotations = Annotations()
 }
 
 enum MediaIndex {
@@ -30,6 +32,9 @@ enum MediaIndex {
         else { return MediaInfo() }
         var info = MediaInfo()
         info.rating = Ratings.read(from: source)
+        if let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil) {
+            info.annotations = Annotations.read(from: metadata)
+        }
         let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
         let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
         let dateString = (exif[kCGImagePropertyExifDateTimeOriginal] as? String)
@@ -51,7 +56,10 @@ enum MediaIndex {
     private static func readVideo(_ url: URL) async -> MediaInfo {
         let asset = AVURLAsset(url: url)
         var info = MediaInfo()
-        info.rating = VideoXMP.readRating(from: url)
+        if let metadata = VideoXMP.readXMP(from: url).flatMap({ CGImageMetadataCreateFromXMPData($0 as CFData) }) {
+            info.rating = VideoXMP.readRating(from: metadata)
+            info.annotations = Annotations.read(from: metadata)
+        }
         if let item = try? await asset.load(.creationDate) {
             info.captureDate = try? await item.load(.dateValue)
         }

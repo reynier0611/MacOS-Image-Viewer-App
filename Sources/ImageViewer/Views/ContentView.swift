@@ -205,6 +205,10 @@ struct MainToolbar: ToolbarContent {
                         Label("Text", systemImage: "text.viewfinder")
                     }
                     .help("Find and select text in the image (⌘T)")
+                    Toggle(isOn: Binding(get: { model.isAdjusting }, set: { _ in model.toggleAdjusting() })) {
+                        Label("Adjust", systemImage: "slider.horizontal.3")
+                    }
+                    .help("Adjust exposure, contrast, color… (⇧⌘A)")
                     ControlGroup {
                         Button { model.changeOrientation(.rotateLeft) } label: { Label("Rotate Left", systemImage: "rotate.left") }
                             .help("Rotate left (⌘L)")
@@ -212,10 +216,6 @@ struct MainToolbar: ToolbarContent {
                             .help("Rotate right (⌘R)")
                     }
                 }
-                Button { model.toggleFullScreen() } label: {
-                    Label("Full Screen", systemImage: "arrow.up.left.and.arrow.down.right")
-                }
-                .help("Full screen (F)")
                 if let item = model.currentItem {
                     ShareLink(item: item.url)
                         .help("Share (AirDrop, Messages, …)")
@@ -268,7 +268,7 @@ struct MainToolbar: ToolbarContent {
             Menu {
                 ToolsMenuItems()
             } label: {
-                Label("Tools", systemImage: "wand.and.stars")
+                Label("Tools", systemImage: "wrench.adjustable")
             }
             .help("Rotate, rename, export, find duplicates")
             Toggle(isOn: $model.showInspector) {

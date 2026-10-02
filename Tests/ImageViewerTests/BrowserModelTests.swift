@@ -281,13 +281,13 @@ extension AppModelSuite {
 
             grouped { model.setRating(4) }
             #expect(model.rating(for: model.images[0]) == 4) // on screen immediately
-            await model.finishRatingWrites()
+            await model.finishMetadataWrites()
             #expect(Ratings.read(folder.file("a.jpg")) == 4)
             #expect(Ratings.read(folder.file("b.jpg")) == 4)
             #expect(Ratings.read(folder.file("c.jpg")) == nil)
 
             undoLastAction()
-            await model.finishRatingWrites()
+            await model.finishMetadataWrites()
             #expect(Ratings.read(folder.file("a.jpg")) == 0)
             #expect(model.rating(for: model.images[0]) == 0)
         }
@@ -310,7 +310,7 @@ extension AppModelSuite {
             #expect(model.rating(for: model.images[0]) == Ratings.rejected)
             grouped { #expect(press("x", code: 7)) } // X again un-rejects
             #expect(model.rating(for: model.images[0]) == 0)
-            await model.finishRatingWrites()
+            await model.finishMetadataWrites()
             #expect(Ratings.read(folder.file("a.jpg")) == 0)
             #expect(Ratings.read(folder.file("b.jpg")) == nil)
         }
@@ -342,7 +342,7 @@ extension AppModelSuite {
             model.reload()
             try await waitUntil { model.allImages.count == 2 }
             grouped { model.setRating(3, for: model.allImages) }
-            await model.finishRatingWrites()
+            await model.finishMetadataWrites()
             #expect(model.errorMessage == nil)
             #expect(Ratings.read(folder.file("a.jpg")) == 3)
             #expect(model.toast?.message.contains("1 skipped") == true)

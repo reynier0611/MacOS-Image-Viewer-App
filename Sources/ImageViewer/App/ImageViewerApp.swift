@@ -40,10 +40,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        Task.detached(priority: .background) { ThumbnailDiskCache.shared.prune() }
+        Task.detached(priority: .background) {
+            ThumbnailDiskCache.shared.prune()
+            ImageAdjuster.pruneBackups()
+        }
         // Open-file events are delivered before this, so they take precedence over the default folder.
         DispatchQueue.main.async {
             BrowserModel.shared.openDefaultFolderIfNeeded()
+            DefaultApp.askIfNeeded()
         }
     }
 

@@ -1,5 +1,6 @@
 import Foundation
 import ImageIO
+import UniformTypeIdentifiers
 
 /// Ratings inside MP4 / MOV / M4V files, stored as an XMP packet in a top-level `uuid` box: the
 /// place Adobe tools and exiftool use for MP4 XMP. Writing never re-encodes or moves anything:
@@ -84,26 +85,42 @@ enum VideoXMP {
         return try? handle.read(upToCount: Int(box.offset + box.size - box.payloadOffset))
     }
 
+    static func isVideo(_ url: URL) -> Bool {
+        UTType(filenameExtension: url.pathExtension)?.conforms(to: .movie) ?? false
+    }
+
     static func readRating(from url: URL) -> Int? {
         guard let data = readXMP(from: url),
-              let metadata = CGImageMetadataCreateFromXMPData(data as CFData),
-              let value = CGImageMetadataCopyStringValueWithPath(metadata, nil, "xmp:Rating" as CFString) as String?,
+              let metadata = CGImageMetadataCreateFromXMPData(data as CFData)
+        else { return nil }
+        return readRating(from: metadata)
+    }
+
+    static func readRating(from metadata: CGImageMetadata) -> Int? {
+        guard let value = CGImageMetadataCopyStringValueWithPath(metadata, nil, "xmp:Rating" as CFString) as String?,
               let rating = Int(value.trimmingCharacters(in: .whitespaces)) ?? Double(value).map({ Int($0) })
         else { return nil }
         return min(max(rating, Ratings.range.lowerBound), Ratings.range.upperBound)
     }
 
     static func writeRating(_ rating: Int, to url: URL) throws {
+        try update(url) { metadata in
+            CGImageMetadataSetValueWithPath(metadata, nil, "xmp:Rating" as CFString, "\(rating)" as CFString)
+        }
+    }
+
+    /// Rewrites the file's XMP packet after `change` edits it (`change` returns false to give up).
+    static func update(_ url: URL, _ change: (CGMutableImageMetadata) -> Bool) throws {
         let boxes = try topLevelBoxes(of: url, forWriting: true)
         let modified = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate]
 
-        // Keep any other XMP the file already has (title, keywords…); only the rating changes.
+        // Keep any other XMP the file already has; only what `change` touches is different.
         let metadata = readXMP(from: url)
             .flatMap { CGImageMetadataCreateFromXMPData($0 as CFData) }
             .flatMap { CGImageMetadataCreateMutableCopy($0) } ?? CGImageMetadataCreateMutable()
-        guard CGImageMetadataSetValueWithPath(metadata, nil, "xmp:Rating" as CFString, "\(rating)" as CFString),
+        guard change(metadata),
               let packet = CGImageMetadataCreateXMPData(metadata, nil) as Data?
-        else { throw VideoXMPError.unsupported("the rating couldn't be encoded") }
+        else { throw VideoXMPError.unsupported("the metadata couldn't be encoded") }
 
         var box = Data()
         let size = UInt32(8 + 16 + packet.count)

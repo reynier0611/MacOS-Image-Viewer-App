@@ -1,5 +1,6 @@
 import AVFoundation
 import AppKit
+import CoreImage
 import Observation
 import SwiftUI
 import UniformTypeIdentifiers
@@ -100,6 +101,22 @@ final class BrowserModel {
     var imageError: String?
     var zoomRequest: ZoomRequest?
     var zoomPercent: Int?
+
+    // MARK: Adjust Color
+
+    var isAdjusting = false
+    var adjustments = Adjustments() {
+        didSet { if adjustments != oldValue { renderAdjustmentPreview() } }
+    }
+    /// The adjusted version shown in the viewer (nil: the original).
+    var adjustmentPreview: NSImage?
+    /// While the "compare" button is held, the original is shown.
+    var isShowingOriginal = false
+    var isSavingAdjustments = false
+    @ObservationIgnored var adjustmentBase: CIImage?
+    @ObservationIgnored var adjustmentAutoFilters: [CIFilter]?
+    @ObservationIgnored var isRenderingAdjustment = false
+    @ObservationIgnored var adjustmentRenderPending = false
 
     // MARK: Text recognition (OCR)
 
@@ -213,7 +230,8 @@ final class BrowserModel {
     @ObservationIgnored var indexTask: Task<Void, Never>?
     @ObservationIgnored var textTask: Task<Void, Never>?
     /// Rating writes run one after another, in the order they were requested.
-    @ObservationIgnored var ratingWrites: Task<Void, Never>?
+    /// Writes into files' metadata (ratings, tags, notes), done one after another in the background.
+    @ObservationIgnored var metadataWrites: Task<Void, Never>?
     @ObservationIgnored var recognizedURL: URL?
     @ObservationIgnored var textCache: [URL: [RecognizedLine]] = [:]
     @ObservationIgnored var analysisTask: Task<Void, Never>?

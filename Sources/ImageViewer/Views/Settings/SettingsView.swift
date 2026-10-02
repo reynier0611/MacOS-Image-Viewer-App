@@ -53,8 +53,37 @@ private struct GeneralSettings: View {
                 }
                 Toggle("Show hidden files", isOn: $model.showHidden)
             }
+            Section {
+                LabeledContent("Opens photos and videos") {
+                    HStack {
+                        Text(isDefault ? "Yes" : "No")
+                            .foregroundStyle(isDefault ? .green : .secondary)
+                        if isDefault {
+                            Button("Give Back to Preview") { change { await DefaultApp.restoreApple() } }
+                        } else {
+                            Button("Make Default") { change { await DefaultApp.makeDefault() } }
+                        }
+                    }
+                }
+            } footer: {
+                Text("What opens when you double-click an image (JPEG, PNG, HEIC, RAW…) or a video (MOV, MP4) in Finder. Giving back restores Preview for images and QuickTime Player for videos.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            isDefault = DefaultApp.isDefault
+        }
+    }
+
+    @State private var isDefault = DefaultApp.isDefault
+
+    private func change(_ action: @escaping @MainActor () async -> Void) {
+        Task {
+            await action()
+            isDefault = DefaultApp.isDefault
+        }
     }
 
     private func chooseFolder() {

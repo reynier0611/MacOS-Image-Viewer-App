@@ -11,6 +11,10 @@ extension BrowserModel {
     func openImage(at index: Int) {
         guard images.indices.contains(index) else { return }
         let item = images[index]
+        if isAdjusting, item.url != displayedURL {
+            guard !hasUnsavedAdjustments else { return remindToSaveAdjustments() }
+            endAdjusting()
+        }
         viewerIndex = index
         selection = item.url
         guard item.url != displayedURL else { return }
@@ -63,6 +67,7 @@ extension BrowserModel {
     }
 
     func closeViewer() {
+        endAdjusting()
         isTextRecognitionOn = false
         imageTask?.cancel()
         videoPlayer?.pause()

@@ -19,6 +19,7 @@ struct InspectorView: View {
                             Label("\(model.selectedURLs.count) items selected", systemImage: "checkmark.circle")
                                 .font(.headline)
                         }
+                        annotationSections(for: item)
                         if !item.isDirectory && !item.isVideo {
                             section("Histogram") {
                                 if let histogram {
@@ -89,6 +90,44 @@ struct InspectorView: View {
                     .frame(maxHeight: .infinity)
             }
         }
+    }
+
+    /// The files the tags apply to: every selected image in the grid, or just the inspected one.
+    private func annotationTargets(for item: FileItem) -> [FileItem] {
+        let items = (!model.isViewing && model.selectedURLs.count > 1) ? model.selectedImages : [item]
+        return items.filter { !$0.isDirectory }
+    }
+
+    @ViewBuilder
+    private func annotationSections(for item: FileItem) -> some View {
+        let targets = annotationTargets(for: item)
+        let storable = targets.filter(Annotations.canStore)
+        if !targets.isEmpty {
+            if storable.isEmpty {
+                section("Tags & Note") {
+                    Text("Tags and notes can't be saved in this file type (they're kept inside JPEG, HEIC, PNG, TIFF, MP4 and MOV files).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                section(storable.count > 1 ? "Tags (\(storable.count) items)" : "Tags") {
+                    TagEditor(items: storable)
+                    if storable.count < targets.count {
+                        Text("\(targets.count - storable.count) selected file\(targets.count - storable.count == 1 ? "" : "s") can't hold tags (unsupported type).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if storable.count == 1, let only = storable.first {
+                    section("Note") {
+                        NoteEditor(item: only)
+                            .id(only.url)
+                    }
+                }
+            }
+        }
+        Color.clear.frame(height: 0)
+            .task(id: targets.map(\.url)) { await model.loadMediaInfoIfNeeded(targets) }
     }
 
     private struct HistogramKey: Hashable {
