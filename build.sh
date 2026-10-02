@@ -32,8 +32,23 @@ cp Resources/AppIcon.icns "$APP/Contents/Resources/"
 sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD_NUMBER/" Resources/Info.plist > "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
-# Ad-hoc signature: required to run on Apple Silicon. Not notarized (see README for other Macs).
-codesign --force --sign - "$APP"
+# Sign with a stable identity when this Mac has one (Developer ID, else Apple Development), so
+# macOS privacy permissions (Desktop, Documents, Full Disk Access…) survive rebuilds. An ad-hoc
+# signature is tied to the exact binary, so every rebuild looks like a new app and is asked again.
+# Override with SIGN_IDENTITY="<name or SHA-1>"; SIGN_IDENTITY=- forces ad-hoc. Not notarized either way.
+if [ -z "${SIGN_IDENTITY:-}" ]; then
+    identities="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+    # (`|| true`: finding no such certificate is normal, not an error under `set -e`/pipefail)
+    SIGN_IDENTITY="$(echo "$identities" | grep '"Developer ID Application' | head -1 | awk '{print $2}' || true)"
+    [ -n "$SIGN_IDENTITY" ] || SIGN_IDENTITY="$(echo "$identities" | grep '"Apple Development' | head -1 | awk '{print $2}' || true)"
+    [ -n "$SIGN_IDENTITY" ] || SIGN_IDENTITY="-"
+fi
+codesign --force --sign "$SIGN_IDENTITY" "$APP"
+if [ "$SIGN_IDENTITY" = "-" ]; then
+    echo "    Signed: ad-hoc (macOS will ask for folder permissions again after each rebuild)"
+else
+    echo "    Signed: $(codesign -dvv "$APP" 2>&1 | grep -m1 '^Authority=' | cut -d= -f2)"
+fi
 
 rm -f "build/ImageViewer.zip"
 ditto -c -k --keepParent "$APP" "build/ImageViewer.zip"

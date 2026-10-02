@@ -48,7 +48,11 @@ The app isn't notarized by Apple, so pick one of these:
    Without that last step, macOS says the app "can't be opened". You can also allow it under
    System Settings ▸ Privacy & Security ▸ **Open Anyway**.
 
-The first time you browse Desktop, Documents, Downloads or an external drive, macOS asks for permission. Click Allow.
+### Folder permissions
+
+macOS asks before an app opens Desktop, Documents, Downloads, or external and network drives. To never be asked, turn on **Full Disk Access** for Image Viewer: **Settings ▸ Privacy ▸ Turn On…** opens the right page in System Settings.
+
+`build.sh` signs the app with your Apple Development or Developer ID certificate when the Mac has one, and says which it used. That gives the app a stable identity, so permissions survive rebuilds and updates. Without a certificate it falls back to an "ad-hoc" signature, which is tied to the exact build, so macOS asks again after every rebuild. Override with `SIGN_IDENTITY="…" ./build.sh` (`SIGN_IDENTITY=-` forces ad-hoc).
 
 ## Keyboard shortcuts
 

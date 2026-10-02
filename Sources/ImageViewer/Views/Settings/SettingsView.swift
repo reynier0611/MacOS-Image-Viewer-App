@@ -87,10 +87,24 @@ private struct ViewerSettings: View {
 private struct PrivacySettings: View {
     @Environment(BrowserModel.self) private var model
     @State private var recognizedCount: Int?
+    @State private var hasFullDiskAccess = FullDiskAccess.isGranted
 
     var body: some View {
         @Bindable var model = model
         Form {
+            Section {
+                LabeledContent("Full Disk Access") {
+                    HStack {
+                        Text(hasFullDiskAccess ? "On" : "Off")
+                            .foregroundStyle(hasFullDiskAccess ? .green : .secondary)
+                        Button(hasFullDiskAccess ? "Open Settings…" : "Turn On…") { FullDiskAccess.openSettings() }
+                    }
+                }
+            } footer: {
+                Text("macOS asks before an app opens Desktop, Documents, Downloads, or external and network drives. With Full Disk Access, Image Viewer can open any folder without asking. In System Settings, switch on Image Viewer (or add it with +).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section {
                 Toggle("Remember folders I move photos into", isOn: $model.remembersMoveDestinations)
                 LabeledContent("Remembered") {
@@ -128,5 +142,27 @@ private struct PrivacySettings: View {
         }
         .formStyle(.grouped)
         .task { recognizedCount = await ContentAnalyzer.shared.cachedCount }
+        // Re-check when coming back from System Settings.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            hasFullDiskAccess = FullDiskAccess.isGranted
+        }
+    }
+}
+
+enum FullDiskAccess {
+    /// The privacy database is only readable by apps with Full Disk Access, so trying to open it
+    /// is a reliable check (it's opened read-only and closed immediately; nothing is read).
+    static var isGranted: Bool {
+        let path = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/com.apple.TCC/TCC.db").path
+        guard let handle = FileHandle(forReadingAtPath: path) else { return false }
+        try? handle.close()
+        return true
+    }
+
+    static func openSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+            NSWorkspace.shared.open(url)
+        }
     }
 }
