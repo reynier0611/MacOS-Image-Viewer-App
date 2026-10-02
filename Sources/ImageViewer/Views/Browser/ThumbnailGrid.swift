@@ -21,13 +21,13 @@ struct ThumbnailGrid: View {
         )
     }
 
-    private let spacing: CGFloat = 12
+    private let spacing: CGFloat = 24 // room between photos to start a selection rectangle
     private let padding: CGFloat = 16
     private static let space = "gridContent"
 
     var body: some View {
         let size = CGFloat(model.thumbnailSize)
-        let cellWidth = size + 12
+        let cellWidth = size + 8
 
         GeometryReader { geometry in
             let columns = max(1, Int((geometry.size.width - padding * 2 + spacing) / (cellWidth + spacing)))
@@ -37,7 +37,7 @@ struct ThumbnailGrid: View {
                 ScrollView {
                     LazyVGrid(
                         columns: Array(repeating: GridItem(.fixed(cellWidth), spacing: spacing), count: columns),
-                        spacing: 16
+                        spacing: 22
                     ) {
                         ForEach(model.gridItems) { item in
                             cell(for: item, size: size, layout: layout)

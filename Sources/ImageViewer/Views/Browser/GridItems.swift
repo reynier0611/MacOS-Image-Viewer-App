@@ -12,27 +12,18 @@ struct GridCell: View {
 
     var body: some View {
         VStack(spacing: 5) {
-            Group {
-                if item.isDirectory {
-                    Image(nsImage: NSWorkspace.shared.icon(forFile: item.url.path))
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: size * 0.75, height: size * 0.75)
-                        .frame(width: size, height: size)
-                } else {
-                    ThumbnailView(item: item, size: size)
-                        .opacity(rating == Ratings.rejected ? 0.4 : 1) // rejects fade back, like Lightroom
-                        .overlay(alignment: .bottom) {
-                            RatingBadge(rating: rating)
-                                .padding(.bottom, 4)
-                        }
-                }
+            // Only the picture itself (and the name below) responds to clicks; the rest of the
+            // square, and the gaps between cells, are empty space for starting a selection rectangle.
+            if item.isDirectory {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: item.url.path))
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: size * 0.75, height: size * 0.75)
+                    .background { SelectionHighlight(isSelected: isSelected) }
+                    .frame(width: size, height: size)
+            } else {
+                ThumbnailView(item: item, size: size, isSelected: isSelected, rating: rating)
             }
-            .padding(6)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isSelected ? Color.secondary.opacity(0.22) : .clear)
-            )
 
             Text(item.name)
                 .font(.callout)
@@ -46,7 +37,7 @@ struct GridCell: View {
                     RoundedRectangle(cornerRadius: 4)
                         .fill(isSelected ? Color.accentColor : .clear)
                 )
-                .frame(width: size + 12)
+                .frame(width: size + 8)
             if let location {
                 // Always one line (blank for the top folder) so rows keep the same height.
                 Label(location.isEmpty ? " " : location, systemImage: "folder")
@@ -56,22 +47,38 @@ struct GridCell: View {
                     .lineLimit(1)
                     .truncationMode(.head)
                     .opacity(location.isEmpty ? 0 : 1)
-                    .frame(width: size + 12)
+                    .frame(width: size + 8)
+                    .allowsHitTesting(false)
             }
         }
-        .contentShape(Rectangle())
         .help(location.map { $0.isEmpty ? item.name : "\($0)/\(item.name)" } ?? item.name)
+    }
+}
+
+/// The grid's selection highlight: a soft rounded backdrop that hugs the picture itself.
+struct SelectionHighlight: View {
+    let isSelected: Bool
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 7)
+            .fill(isSelected ? Color.secondary.opacity(0.25) : .clear)
+            .padding(-5)
+            .allowsHitTesting(false)
     }
 }
 
 struct ThumbnailView: View {
     let item: FileItem
     let size: CGFloat
+    var isSelected = false
+    var rating = 0
     @State private var image: NSImage?
 
-    init(item: FileItem, size: CGFloat) {
+    init(item: FileItem, size: CGFloat, isSelected: Bool = false, rating: Int = 0) {
         self.item = item
         self.size = size
+        self.isSelected = isSelected
+        self.rating = rating
         _image = State(initialValue: ThumbnailLoader.shared.cached(for: item, maxPixel: Self.bucket(for: size)))
     }
 
@@ -101,10 +108,18 @@ struct ThumbnailView: View {
                         }
                     }
                     .shadow(color: .black.opacity(0.25), radius: 1.5, y: 1)
+                    .opacity(rating == Ratings.rejected ? 0.4 : 1) // rejects fade back, like Lightroom
+                    .overlay(alignment: .bottom) {
+                        RatingBadge(rating: rating)
+                            .padding(.bottom, 4)
+                            .allowsHitTesting(false)
+                    }
+                    .background { SelectionHighlight(isSelected: isSelected) }
             } else {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(.quaternary)
                     .frame(width: size * 0.8, height: size * 0.6)
+                    .background { SelectionHighlight(isSelected: isSelected) }
             }
         }
         .frame(width: size, height: size)
