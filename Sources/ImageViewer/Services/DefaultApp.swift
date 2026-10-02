@@ -2,25 +2,16 @@ import AppKit
 import UniformTypeIdentifiers
 
 /// Making Image Viewer the app that opens photos and videos when they're double-clicked in Finder.
-/// macOS keeps one default per file type, so each common type is claimed separately. PDFs are left
-/// to Preview. Giving them back restores Preview (images) and QuickTime Player (videos).
+/// Only the main formats are claimed; camera RAW, PDFs and everything else stay with whatever opens
+/// them now (Photoshop, Preview…). macOS keeps one default per type and asks the user to confirm
+/// each change itself (an app can't change them silently), so types already set are skipped.
+/// Giving them back restores Preview (images) and QuickTime Player (videos).
 @MainActor
 enum DefaultApp {
     static let askedKey = "askedToBecomeDefault"
 
-    static let imageTypes: [UTType] = [
-        .jpeg, .png, .heic, .heif, .gif, .tiff, .webP, .bmp, .ico,
-        UTType("public.avif"), UTType("public.jpeg-2000"),
-        // Camera RAW (each maker has its own type)
-        UTType("com.adobe.raw-image"), UTType("com.canon.cr2-raw-image"), UTType("com.canon.cr3-raw-image"),
-        UTType("com.canon.crw-raw-image"), UTType("com.nikon.raw-image"), UTType("com.nikon.nrw-raw-image"),
-        UTType("com.sony.arw-raw-image"), UTType("com.fuji.raw-image"), UTType("com.olympus.or-raw-image"),
-        UTType("com.panasonic.rw2-raw-image"), UTType("com.pentax.raw-image"),
-    ].compactMap { $0 }
-
-    static let videoTypes: [UTType] = [
-        .quickTimeMovie, .mpeg4Movie, UTType("com.apple.m4v-video"),
-    ].compactMap { $0 }
+    static let imageTypes: [UTType] = [.jpeg, .png, .heic, .gif, .tiff, .webP]
+    static let videoTypes: [UTType] = [.quickTimeMovie, .mpeg4Movie]
 
     static var allTypes: [UTType] { imageTypes + videoTypes }
 
@@ -29,23 +20,24 @@ enum DefaultApp {
         Bundle.main.bundleIdentifier != nil && Bundle.main.bundleURL.path.hasPrefix("/Applications/")
     }
 
-    /// True when every type above already opens in this app.
-    static var isDefault: Bool {
-        let me = Bundle.main.bundleURL.standardizedFileURL
-        return allTypes.allSatisfy { NSWorkspace.shared.urlForApplication(toOpen: $0)?.standardizedFileURL == me }
+    private static func isMine(_ type: UTType) -> Bool {
+        NSWorkspace.shared.urlForApplication(toOpen: type)?.standardizedFileURL == Bundle.main.bundleURL.standardizedFileURL
     }
 
+    /// True when every type above already opens in this app.
+    static var isDefault: Bool { allTypes.allSatisfy(isMine) }
+
     static func makeDefault() async {
-        await setHandler(Bundle.main.bundleURL, for: allTypes)
+        await setHandler(Bundle.main.bundleURL, for: allTypes.filter { !isMine($0) })
     }
 
     static func restoreApple() async {
         let workspace = NSWorkspace.shared
         if let preview = workspace.urlForApplication(withBundleIdentifier: "com.apple.Preview") {
-            await setHandler(preview, for: imageTypes)
+            await setHandler(preview, for: imageTypes.filter(isMine))
         }
         if let quickTime = workspace.urlForApplication(withBundleIdentifier: "com.apple.QuickTimePlayerX") {
-            await setHandler(quickTime, for: videoTypes)
+            await setHandler(quickTime, for: videoTypes.filter(isMine))
         }
     }
 
@@ -63,7 +55,7 @@ enum DefaultApp {
         guard !isDefault else { return }
         let alert = NSAlert()
         alert.messageText = "Open photos and videos with Image Viewer?"
-        alert.informativeText = "Double-clicking an image (JPEG, PNG, HEIC, RAW…) or a video (MOV, MP4) in Finder will open it here instead of in Preview or QuickTime Player. You can change this anytime in Settings ▸ General."
+        alert.informativeText = "Double-clicking a JPEG, PNG, HEIC, GIF, TIFF or WebP image, or a MOV or MP4 video, in Finder will open it here. Camera RAW files and everything else keep opening where they do now.\n\nmacOS then asks you to confirm each format once. You can change this anytime in Settings ▸ General."
         alert.addButton(withTitle: "Make Default")
         alert.addButton(withTitle: "Not Now")
         if alert.runModal() == .alertFirstButtonReturn {

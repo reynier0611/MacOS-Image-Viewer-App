@@ -57,6 +57,7 @@ enum ShortcutCatalog {
             s("⌃⌘N", "New folder with selection…"),
             s("⌘L  /  ⌘R", "Rotate left  /  right"),
             s("⇧⌘A", "Adjust color  (⌘S saves)"),
+            s("⇧⌘L", "Set location…"),
             s("⇧⌘R", "Batch rename…"),
             s("⌘E", "Export…"),
             s("⌥⌘D", "Find duplicates…"),

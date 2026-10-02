@@ -13,6 +13,7 @@ A native macOS image viewer and browser (SwiftUI, macOS 14 Sonoma or later, Appl
 - Move the selection to the Trash (⌘⌫), including **folders** (from the grid or by right-clicking in the sidebar; you're asked to confirm first). Home, drives and standard folders like Desktop are protected. Undo (⌘Z) reverses any move or trash, including a whole batch. Also Rename, Copy Image, Copy Path, Reveal in Finder, Open in Preview, and Share/AirDrop.
 - **Star ratings saved inside the photo**: press 1–5 (0 clears, X rejects) on the open image or a whole selection, or use the stars in the inspector or the Rating menus. The rating is written into the file itself as the standard XMP Rating that Lightroom, Bridge, Capture One, digiKam and Windows Explorer read, so it travels with the file. Pixels and "date modified" are untouched, and Undo works. Works for JPEG, HEIC, PNG and TIFF, and for MP4/MOV/M4V videos, where the rating is a small XMP block (the place Adobe tools use) appended to the end of the file without re-encoding or moving anything. RAW files aren't supported yet. Thumbnails show the stars, rejected photos are dimmed, and you can filter and sort by rating.
 - **Tags and notes saved inside the file**: in the inspector (ⓘ), type tags (Return or a comma adds one; tags already used in the folder are suggested) and a free-text note about the photo. With several photos selected, tags are added to or removed from all of them, and a tag only some have shows how many (e.g. "2/5"). They're stored as the standard XMP Keywords (`dc:subject`) and Caption (`dc:description`), mirrored to IPTC, which Lightroom, Bridge and Photos read. Pixels and "date modified" are untouched, and Undo works. Search finds photos by tag or by words in the note. Same file types as ratings (JPEG, HEIC, PNG, TIFF, MP4/MOV/M4V); a PNG is re-encoded losslessly to carry them, so its pixels stay identical.
+- **Set Location** (⇧⌘L, right-click ▸ Set Location…, or **Add Location…** in the inspector) for photos without one, or to fix a wrong one: click the map to drop a pin, search for a place or address, or type coordinates ("40.4168, -3.7038"). With several photos selected, they all get the same location. For a photo with none, the map starts near the photo in the folder taken closest in time. It's saved as the standard EXIF GPS location (read by Photos, Lightroom and map apps), with Undo; **Remove Location** takes it out. Works for JPEG, HEIC, PNG and TIFF photos (PNG and TIFF are re-encoded losslessly). The place search sends what you type to Apple's map service, like the Maps app; picking on the map or typing coordinates doesn't.
 - **Adjust Color** (⇧⌘A, or the sliders button in the viewer): exposure, contrast, highlights, shadows, saturation, vibrance, temperature, tint and sharpness, plus **Auto Enhance**, with a live preview. Hold the eye button to compare with the original; click a value to reset that slider. **Save…** asks whether to **Save as Copy** (the default: "name (edited).jpg" next to the original) or **Overwrite Original** (undoable with ⌘Z for a week; the original is kept in ~/Library/Caches meanwhile). Both keep the date taken, location, camera details, rating, tags and note. RAW, WebP, GIF and other formats that can't be rewritten are saved as a JPEG copy. You can't move to another photo with unsaved adjustments; save or cancel first.
 - **All Subfolders** (toolbar button, or View ▸ Show All Subfolders, ⌥⌘S) flattens the folder: every photo and video from all its subfolders appears in one grid, with no folder tiles, and each thumbnail shows which subfolder it's in. Everything else works the same: viewer, search, filters, ratings, move, trash and undo. Hidden folders and packages (such as the Photos library) are skipped. Files added by other apps anywhere in the tree show up automatically. Turn it off to go back to folders.
 - **World map** (the Grid / Map switch in the toolbar, or ⌘1 / ⌘2): every photo and video in the current view that has a location, shown as a pin whose head is its thumbnail. Flattened subfolders, search and filters all apply. Nearby pins merge into a stacked bubble with a count, and split as you zoom in. Click a bubble to see the photos in it (click one to open it) or to Zoom In; photos taken at the very same spot never split apart, so the list is the way to reach them. Click a pin to select it and see a larger preview (name, date and an **Open** button); double-click a pin (or press Return) to open it straight away. Esc goes back to the map. Pins respond even when the window isn't frontmost.
@@ -54,9 +55,11 @@ The app isn't notarized by Apple, so pick one of these:
 
 ### Opening photos and videos from Finder
 
-On its first launch from Applications, the app asks whether it should open photos and videos
-(JPEG, PNG, HEIC, RAW, MOV, MP4…) instead of Preview and QuickTime Player. Change this anytime
-in **Settings ▸ General** (Make Default / Give Back to Preview). PDFs stay with Preview.
+On its first launch from Applications, the app asks once whether it should open the main formats
+(JPEG, PNG, HEIC, GIF, TIFF, WebP, MOV, MP4) instead of Preview and QuickTime Player. macOS then
+confirms each format itself (apps can't change defaults silently); formats already set are skipped.
+Camera RAW, PDFs and other formats are left to whatever opens them now. Change this anytime in
+**Settings ▸ General** (Make Default / Give Back to Preview).
 
 ### Folder permissions
 
@@ -105,6 +108,7 @@ macOS asks before an app opens Desktop, Documents, Downloads, or external and ne
 | 1–5 / 0 / X | Rate / clear / reject (saved in the file) |
 | ⌘T | Recognize text (select lines, ⌘C to copy) |
 | ⇧⌘A | Adjust color (⌘S saves) |
+| ⇧⌘L | Set location… |
 | ⌘L / ⌘R | Rotate left / right |
 | ⇧⌘R | Batch rename… |
 | ⌘E | Export… |

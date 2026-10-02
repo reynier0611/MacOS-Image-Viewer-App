@@ -70,7 +70,7 @@ struct InspectorView: View {
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .task(id: item.url) {
+                .task(id: "\(item.url.path)|\(model.metadataRevision)") {
                     metadata = nil
                     labels = nil
                     let url = item.url
@@ -159,6 +159,19 @@ struct InspectorView: View {
     @ViewBuilder
     private func mapSection(for item: FileItem) -> some View {
         let points = mapPoints(for: item)
+        let placeable = annotationTargets(for: item).filter(ImageLocation.canStore)
+        if points.isEmpty && !placeable.isEmpty {
+            section("Location") {
+                Button {
+                    model.showLocationPicker(for: placeable)
+                } label: {
+                    Label(placeable.count > 1 ? "Add Location to \(placeable.count) Photos…" : "Add Location…", systemImage: "mappin.and.ellipse")
+                }
+                Text(placeable.count > 1 ? "None of the selected photos has a location." : "This photo has no location.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
         if !points.isEmpty {
             section(points.count > 1 ? "Map (\(points.count) photos)" : "Map") {
                 Map(initialPosition: initialMapPosition(for: points)) {
@@ -175,6 +188,13 @@ struct InspectorView: View {
                 .id(points.map(\.id).joined()) // re-frame when the selection changes
                 .frame(height: 240)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
+                if !placeable.isEmpty {
+                    Button {
+                        model.showLocationPicker(for: placeable)
+                    } label: {
+                        Label("Change Location…", systemImage: "mappin.and.ellipse")
+                    }
+                }
             }
         }
     }

@@ -158,6 +158,12 @@ struct ItemContextMenu: View {
             Menu(targets.count > 1 ? "Rate \(targets.count) Images" : "Rating") {
                 RatingMenuItems(items: targets)
             }
+            let placeable = targets.filter(ImageLocation.canStore)
+            if !placeable.isEmpty {
+                Button(placeable.count > 1 ? "Set Location of \(placeable.count) Photos…" : "Set Location…") {
+                    model.showLocationPicker(for: placeable)
+                }
+            }
         }
         ShareLink(item: item.url)
         Divider()

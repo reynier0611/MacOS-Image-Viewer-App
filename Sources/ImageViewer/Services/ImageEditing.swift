@@ -89,13 +89,8 @@ enum ImageEditing {
             // one that does. PNG is lossless, so re-encoding the pixels with new metadata is exact.
             let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil)
                 .flatMap { CGImageMetadataCreateMutableCopy($0) } ?? CGImageMetadataCreateMutable()
-            guard change(metadata, false), let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
-            else { throw EditError.unsupported(url.lastPathComponent) }
-            try replace(url, keepModificationDate: true) { temp in
-                guard let destination = CGImageDestinationCreateWithURL(temp as CFURL, type, 1, nil) else { return false }
-                CGImageDestinationAddImageAndMetadata(destination, image, metadata, nil)
-                return CGImageDestinationFinalize(destination)
-            }
+            guard change(metadata, false) else { throw EditError.unsupported(url.lastPathComponent) }
+            try reencode(url, source: source, type: type, metadata: metadata)
             return
         }
         let metadata = CGImageMetadataCreateMutable()
@@ -104,6 +99,39 @@ enum ImageEditing {
             kCGImageDestinationMetadata: metadata,
             kCGImageDestinationMergeMetadata: true,
         ], keepModificationDate: true)
+    }
+
+    /// Replaces the image's metadata with an edited full copy of it, for changes ImageIO can't merge
+    /// (GPS). JPEG and HEIC are rewritten in place without touching the pixels; PNG and TIFF are
+    /// lossless, so they're re-encoded (ImageIO can't change their GPS in place).
+    static func replaceMetadata(of url: URL, _ change: (CGMutableImageMetadata) -> Bool) throws {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let type = CGImageSourceGetType(source),
+              let utType = UTType(type as String)
+        else { throw EditError.unsupported(url.lastPathComponent) }
+        let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil)
+            .flatMap { CGImageMetadataCreateMutableCopy($0) } ?? CGImageMetadataCreateMutable()
+        guard change(metadata) else { throw EditError.unsupported(url.lastPathComponent) }
+        if utType.conforms(to: .png) || utType.conforms(to: .tiff) {
+            try reencode(url, source: source, type: type, metadata: metadata)
+        } else {
+            try rewrite(url, source: source, type: type, options: [
+                kCGImageDestinationMetadata: metadata,
+                kCGImageDestinationMergeMetadata: false,
+            ], keepModificationDate: true)
+        }
+    }
+
+    /// Writes the decoded pixels again with `metadata`. Only for lossless formats (PNG, TIFF).
+    private static func reencode(_ url: URL, source: CGImageSource, type: CFString, metadata: CGImageMetadata) throws {
+        guard let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw EditError.unsupported(url.lastPathComponent) }
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let orientation = properties?[kCGImagePropertyOrientation] ?? 1 // TIFF keeps it outside the XMP
+        try replace(url, keepModificationDate: true) { temp in
+            guard let destination = CGImageDestinationCreateWithURL(temp as CFURL, type, 1, nil) else { return false }
+            CGImageDestinationAddImageAndMetadata(destination, image, metadata, [kCGImagePropertyOrientation: orientation] as CFDictionary)
+            return CGImageDestinationFinalize(destination)
+        }
     }
 
     /// Re-saves a file with changed metadata only (no re-compression of the pixels). Writes next to

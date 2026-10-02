@@ -24,6 +24,7 @@ struct ContentView: View {
         .sheet(isPresented: $model.isDuplicatesPresented) { DuplicatesView() }
         .sheet(isPresented: $model.isBatchRenamePresented) { BatchRenameView() }
         .sheet(isPresented: $model.isExportPresented) { ExportView() }
+        .sheet(isPresented: $model.isLocationPickerPresented) { LocationPickerView(items: model.locationPickerItems) }
         .overlay(alignment: .bottom) { toastView }
         .dropDestination(for: URL.self) { urls, _ in
             guard let url = urls.first else { return false }

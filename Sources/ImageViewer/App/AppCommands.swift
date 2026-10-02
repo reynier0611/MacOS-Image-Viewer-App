@@ -95,6 +95,8 @@ struct AppCommands: Commands {
                 set: { _ in model.toggleAdjusting() }
             ))
             .keyboardShortcut("a", modifiers: [.command, .shift])
+            Button("Set Location…") { model.showLocationPicker() }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
             Divider()
             Button("Rotate Left") { model.changeOrientation(.rotateLeft) }
                 .keyboardShortcut("l")

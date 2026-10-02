@@ -66,7 +66,7 @@ private struct GeneralSettings: View {
                     }
                 }
             } footer: {
-                Text("What opens when you double-click an image (JPEG, PNG, HEIC, RAW…) or a video (MOV, MP4) in Finder. Giving back restores Preview for images and QuickTime Player for videos.")
+                Text("What opens JPEG, PNG, HEIC, GIF, TIFF and WebP images and MOV and MP4 videos when you double-click them in Finder. Camera RAW and other formats are left alone. macOS asks you to confirm each format. Giving back restores Preview for images and QuickTime Player for videos.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

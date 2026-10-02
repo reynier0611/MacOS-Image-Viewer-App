@@ -162,6 +162,10 @@ final class BrowserModel {
     var isDuplicatesPresented = false
     var isBatchRenamePresented = false
     var isExportPresented = false
+    var isLocationPickerPresented = false
+    var locationPickerItems: [FileItem] = []
+    /// Bumped after a write changes a file's details, so the inspector reads them again.
+    var metadataRevision = 0
 
     var gridColumns = 1
     var columnVisibility: NavigationSplitViewVisibility = .all
