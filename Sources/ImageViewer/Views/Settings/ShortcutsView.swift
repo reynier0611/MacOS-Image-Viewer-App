@@ -68,6 +68,7 @@ enum ShortcutCatalog {
             s("⇧⌘G", "Go to folder by typing a path"),
             s("⌘I", "Inspector (details, histogram, map)"),
             s("⌥⌘F", "Filmstrip on / off"),
+            s("⌘1  /  ⌘2", "Grid  /  world map"),
             s("⌥⌘S", "Show all subfolders (flatten)"),
             s("⇧⌘.", "Show hidden files"),
             s("⌘,", "Settings"),

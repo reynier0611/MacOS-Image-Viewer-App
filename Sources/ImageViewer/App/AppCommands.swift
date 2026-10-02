@@ -67,6 +67,11 @@ struct AppCommands: Commands {
                 ForEach(SortKey.allCases) { Text($0.rawValue).tag($0) }
             }
             Toggle("Sort Ascending", isOn: $model.sortAscending)
+            Picker("View", selection: $model.browseLayout) {
+                Text("as Grid").tag(BrowseLayout.grid).keyboardShortcut("1")
+                Text("as Map").tag(BrowseLayout.map).keyboardShortcut("2")
+            }
+            .pickerStyle(.inline)
             Toggle("Show All Subfolders", isOn: $model.showsAllSubfolders)
                 .keyboardShortcut("s", modifiers: [.command, .option])
             Toggle("Show Hidden Files", isOn: $model.showHidden)

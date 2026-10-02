@@ -32,6 +32,8 @@ final class BrowserModel {
     private(set) var isLoadingFolder = false
     /// Bumped whenever the app creates, renames or removes a folder, so the sidebar tree refreshes.
     var folderStructureVersion = 0
+    /// Grid or map, for this session.
+    var browseLayout: BrowseLayout = .grid
     /// Items waiting for "Move to Trash?" confirmation (asked whenever folders are involved).
     var pendingTrash: [FileItem] = []
     /// Moves one item to the Trash and returns where it went (so Undo can put it back).

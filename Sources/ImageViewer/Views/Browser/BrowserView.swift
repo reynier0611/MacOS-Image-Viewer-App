@@ -17,6 +17,8 @@ struct BrowserView: View {
                 }
             } else if let error = model.folderError {
                 ContentUnavailableView("Can't Open Folder", systemImage: "lock", description: Text(error))
+            } else if model.browseLayout == .map {
+                PhotoMapBrowser()
             } else if model.gridItems.isEmpty && model.isFiltering {
                 ContentUnavailableView {
                     Label("No Matches", systemImage: "magnifyingglass")

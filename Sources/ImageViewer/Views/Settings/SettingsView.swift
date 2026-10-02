@@ -88,6 +88,13 @@ private struct PrivacySettings: View {
     @Environment(BrowserModel.self) private var model
     @State private var recognizedCount: Int?
     @State private var hasFullDiskAccess = FullDiskAccess.isGranted
+    @AppStorage(ThumbnailDiskCache.enabledKey) private var keepsThumbnails = true
+    @State private var thumbnailBytes: Int64?
+
+    private func clearThumbnails() {
+        Task.detached { ThumbnailDiskCache.shared.clear() }
+        thumbnailBytes = 0
+    }
 
     var body: some View {
         @Bindable var model = model
@@ -121,6 +128,22 @@ private struct PrivacySettings: View {
                     .foregroundStyle(.secondary)
             }
             Section {
+                Toggle("Keep thumbnails on disk (much faster)", isOn: $keepsThumbnails)
+                    .onChange(of: keepsThumbnails) { if !keepsThumbnails { clearThumbnails() } }
+                LabeledContent("Thumbnail cache") {
+                    HStack {
+                        Text(thumbnailBytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "…")
+                            .foregroundStyle(.secondary)
+                        Button("Clear") { clearThumbnails() }
+                            .disabled(thumbnailBytes == 0)
+                    }
+                }
+            } footer: {
+                Text("Small copies of thumbnails you've browsed, kept only on this Mac so folders open instantly next time. Capped at 500 MB.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
                 LabeledContent("Recognized photos") {
                     HStack {
                         Text(recognizedCount.map { "\($0)" } ?? "…")
@@ -141,7 +164,10 @@ private struct PrivacySettings: View {
             }
         }
         .formStyle(.grouped)
-        .task { recognizedCount = await ContentAnalyzer.shared.cachedCount }
+        .task {
+            recognizedCount = await ContentAnalyzer.shared.cachedCount
+            thumbnailBytes = await Task.detached { ThumbnailDiskCache.shared.totalBytes }.value
+        }
         // Re-check when coming back from System Settings.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             hasFullDiskAccess = FullDiskAccess.isGranted

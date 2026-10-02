@@ -241,6 +241,12 @@ struct MainToolbar: ToolbarContent {
                 }
                 .frame(width: 110)
                 .help("Thumbnail size (⌘- / ⌘=)")
+                Picker("Layout", selection: $model.browseLayout) {
+                    Label("Grid", systemImage: "square.grid.2x2").tag(BrowseLayout.grid)
+                    Label("Map", systemImage: "map").tag(BrowseLayout.map)
+                }
+                .pickerStyle(.segmented)
+                .help("Show thumbnails, or photos with a location on a world map (⌘1 / ⌘2)")
                 Toggle(isOn: $model.showsAllSubfolders) {
                     Label("All Subfolders", systemImage: "rectangle.stack")
                 }

@@ -64,13 +64,21 @@ final class ThumbnailLoader: @unchecked Sendable {
             return nil
         }
         let url = item.url
-        let image: NSImage?
-        if item.isVideo {
-            image = await Self.makeVideoThumbnail(url: url, maxPixel: maxPixel)
-        } else {
-            image = await Task.detached(priority: .userInitiated) {
-                Self.makeThumbnail(url: url, maxPixel: maxPixel)
-            }.value
+        let disk = ThumbnailDiskCache.shared
+        var image: NSImage? = await Task.detached(priority: .userInitiated) {
+            disk.read(item, maxPixel: maxPixel).map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
+        }.value
+        if image == nil {
+            if item.isVideo {
+                image = await Self.makeVideoThumbnail(url: url, maxPixel: maxPixel)
+            } else {
+                image = await Task.detached(priority: .userInitiated) {
+                    Self.makeThumbnail(url: url, maxPixel: maxPixel)
+                }.value
+            }
+            if let cgImage = image?.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                Task.detached(priority: .utility) { disk.write(cgImage, for: item, maxPixel: maxPixel) }
+            }
         }
         await limiter.release()
 

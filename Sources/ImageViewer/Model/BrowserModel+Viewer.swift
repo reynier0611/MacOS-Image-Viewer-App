@@ -55,7 +55,8 @@ extension BrowserModel {
 
     func preloadNeighbors(of url: URL) {
         guard let index = images.firstIndex(where: { $0.url == url }) else { return }
-        for neighbor in [index + 1, index - 1] where images.indices.contains(neighbor) && !images[neighbor].isVideo {
+        // Two ahead and one back, so quick runs of → stay smooth.
+        for neighbor in [index + 1, index + 2, index - 1] where images.indices.contains(neighbor) && !images[neighbor].isVideo {
             let neighborURL = images[neighbor].url
             Task.detached(priority: .utility) { _ = await ImageLoader.shared.load(neighborURL) }
         }

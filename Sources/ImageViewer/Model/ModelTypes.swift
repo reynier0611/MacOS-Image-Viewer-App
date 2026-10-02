@@ -88,6 +88,13 @@ enum RatingFilter: String, CaseIterable, Identifiable {
     }
 }
 
+/// How the browser shows the folder: thumbnails, or pins on a world map.
+enum BrowseLayout: String, CaseIterable, Identifiable {
+    case grid = "Grid"
+    case map = "Map"
+    var id: String { rawValue }
+}
+
 /// Where the app starts when opened on its own (not by opening a file or folder).
 enum LaunchFolder: String, CaseIterable, Identifiable {
     case home = "Home"
