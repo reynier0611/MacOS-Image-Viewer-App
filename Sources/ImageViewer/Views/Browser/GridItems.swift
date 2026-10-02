@@ -7,6 +7,8 @@ struct GridCell: View {
     let size: CGFloat
     let isSelected: Bool
     var rating = 0
+    /// Which subfolder the file is in, when showing all subfolders ("" = the folder itself).
+    var location: String?
 
     var body: some View {
         VStack(spacing: 5) {
@@ -45,9 +47,20 @@ struct GridCell: View {
                         .fill(isSelected ? Color.accentColor : .clear)
                 )
                 .frame(width: size + 12)
+            if let location {
+                // Always one line (blank for the top folder) so rows keep the same height.
+                Label(location.isEmpty ? " " : location, systemImage: "folder")
+                    .labelStyle(.titleAndIcon)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .opacity(location.isEmpty ? 0 : 1)
+                    .frame(width: size + 12)
+            }
         }
         .contentShape(Rectangle())
-        .help(item.name)
+        .help(location.map { $0.isEmpty ? item.name : "\($0)/\(item.name)" } ?? item.name)
     }
 }
 

@@ -76,7 +76,7 @@ struct ContentView: View {
         }
         guard model.folder != nil else { return "" }
         if model.isFiltering {
-            return "Showing \(model.images.count) of \(model.allImages.count)"
+            return (model.showsAllSubfolders ? "All subfolders · " : "") + "Showing \(model.images.count) of \(model.allImages.count)"
         }
         let videoCount = model.images.filter(\.isVideo).count
         let imageCount = model.images.count - videoCount
@@ -90,7 +90,8 @@ struct ContentView: View {
         if model.selectedURLs.count > 1 {
             parts.append("\(model.selectedURLs.count) selected")
         }
-        return parts.joined(separator: ", ")
+        let summary = parts.joined(separator: ", ")
+        return model.showsAllSubfolders ? "All subfolders · " + summary : summary
     }
 
     @ViewBuilder
@@ -234,6 +235,10 @@ struct MainToolbar: ToolbarContent {
                 }
                 .frame(width: 110)
                 .help("Thumbnail size (⌘- / ⌘=)")
+                Toggle(isOn: $model.showsAllSubfolders) {
+                    Label("All Subfolders", systemImage: "rectangle.stack")
+                }
+                .help("Show the photos and videos of all subfolders together, without folders (⌥⌘S)")
                 FilterButton()
                 Menu {
                     MoveToMenuItems()

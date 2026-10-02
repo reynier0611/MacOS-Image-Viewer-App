@@ -35,7 +35,7 @@ extension BrowserModel {
         images = allImages.filter {
             filter.matches($0, captureDate: captureDate(for: $0), labels: contentLabels[$0.url] ?? [], rating: rating(for: $0))
         }
-        folders = allFolders.filter(filter.matchesFolder)
+        folders = showsAllSubfolders ? [] : allFolders.filter(filter.matchesFolder)
 
         if isViewing, let url = displayedURL {
             if let index = images.firstIndex(where: { $0.url == url }) {

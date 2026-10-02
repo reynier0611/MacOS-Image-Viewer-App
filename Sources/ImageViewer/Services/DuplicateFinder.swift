@@ -39,6 +39,15 @@ enum SimilaritySensitivity: String, CaseIterable, Identifiable {
 }
 
 enum DuplicateFinder {
+    /// Every image and video in `folder`, optionally in all its subfolders too (see `FolderScanner`).
+    static func collectItems(
+        in folder: URL, includeSubfolders: Bool, includeHidden: Bool = false,
+        progress: (Int) -> Void = { _ in }
+    ) -> [FileItem] {
+        let items = (try? FolderScanner.scan(folder, recursive: includeSubfolders, showHidden: includeHidden, progress: progress).get()) ?? []
+        return items.filter { !$0.isDirectory }
+    }
+
     /// Finds byte-identical files (SHA-256) and, optionally, visually similar images (on-device Vision).
     static func findGroups(
         in items: [FileItem],

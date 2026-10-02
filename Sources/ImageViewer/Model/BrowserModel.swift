@@ -30,6 +30,19 @@ final class BrowserModel {
     var contentAnalysisTotal = 0
     private(set) var folderError: String?
     private(set) var isLoadingFolder = false
+    /// How many photos/videos a recursive scan has found so far (nil when not scanning subfolders).
+    private(set) var scanFoundCount: Int?
+
+    /// Flatten: show the images and videos of every subfolder together, without folder tiles.
+    /// A view mode for this session; it stays on while you navigate.
+    var showsAllSubfolders = false {
+        didSet {
+            guard showsAllSubfolders != oldValue, let folder else { return }
+            closeViewer()
+            watcher = makeWatcher(for: folder)
+            load(select: selection, viewing: nil)
+        }
+    }
     /// The focused item: arrow keys move it, the inspector shows it. Setting it collapses
     /// the multi-selection to just this item (except inside `adjustingSelection`).
     var selection: URL? {
@@ -160,7 +173,8 @@ final class BrowserModel {
     @ObservationIgnored weak var undoManager: UndoManager?
     @ObservationIgnored let defaults = UserDefaults.standard
     @ObservationIgnored var renameItem: FileItem?
-    @ObservationIgnored var watcher: FolderWatcher?
+    @ObservationIgnored var watcher: AnyObject?
+    @ObservationIgnored var scanTask: Task<Result<[FileItem], Error>, Never>?
     @ObservationIgnored var keyMonitor: Any?
     @ObservationIgnored var loadTask: Task<Void, Never>?
     @ObservationIgnored var imageTask: Task<Void, Never>?
@@ -353,7 +367,7 @@ final class BrowserModel {
             searchText = ""
             selection = nil
             folderError = nil
-            watcher = FolderWatcher(url: url) { [weak self] in self?.reload() }
+            watcher = makeWatcher(for: url)
         }
         load(select: select, viewing: openViewer ? select : nil)
     }
@@ -398,28 +412,39 @@ final class BrowserModel {
     func load(select: URL?, viewing: URL?, fallbackIndex: Int? = nil, alsoSelect: [URL] = []) {
         guard let folder else { return }
         loadTask?.cancel()
+        scanTask?.cancel() // stops a long subfolder scan right away
         isLoadingFolder = true
         let showHidden = showHidden
+        let recursive = showsAllSubfolders
+        scanFoundCount = recursive ? 0 : nil
+        let scan = Task.detached(priority: .userInitiated) { [weak self] in
+            FolderScanner.scan(folder, recursive: recursive, showHidden: showHidden) { found in
+                Task { @MainActor in
+                    if self?.folder == folder, self?.isLoadingFolder == true { self?.scanFoundCount = found }
+                }
+            }
+        }
+        scanTask = scan
         loadTask = Task { [weak self] in
-            let result = await Task.detached(priority: .userInitiated) {
-                BrowserModel.scan(folder, showHidden: showHidden)
-            }.value
-            guard let self, !Task.isCancelled, self.folder == folder else { return }
+            let result = await scan.value
+            guard let self, !Task.isCancelled, self.folder == folder, self.showsAllSubfolders == recursive else { return }
+            self.scanFoundCount = nil
             self.apply(result, select: select, viewing: viewing, fallbackIndex: fallbackIndex, alsoSelect: alsoSelect)
         }
     }
 
-    nonisolated static func scan(_ folder: URL, showHidden: Bool) -> Result<[FileItem], Error> {
-        do {
-            let urls = try FileManager.default.contentsOfDirectory(
-                at: folder,
-                includingPropertiesForKeys: FileItem.resourceKeys,
-                options: showHidden ? [] : [.skipsHiddenFiles]
-            )
-            return .success(urls.compactMap(FileItem.init(url:)))
-        } catch {
-            return .failure(error)
-        }
+    func makeWatcher(for url: URL) -> AnyObject? {
+        showsAllSubfolders
+            ? TreeWatcher(url: url) { [weak self] in self?.reload() }
+            : FolderWatcher(url: url) { [weak self] in self?.reload() }
+    }
+
+    /// Whether a file at `url` belongs in the current listing: directly in the folder, or
+    /// anywhere inside it while showing all subfolders.
+    func isListed(_ url: URL) -> Bool {
+        guard let folder else { return false }
+        let parent = url.deletingLastPathComponent().path
+        return parent == folder.path || (showsAllSubfolders && parent.hasPrefix(folder.path + "/"))
     }
 
     func apply(

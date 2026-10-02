@@ -110,7 +110,7 @@ extension BrowserModel {
                 MainActor.assumeIsolated { model.trash(restored.compactMap(FileItem.init(url:))) }
             }
             undoManager?.setActionName(restored.count == 1 ? "Move to Trash" : "Move \(restored.count) Items to Trash")
-            let here = restored.filter { $0.deletingLastPathComponent().path == folder?.path }
+            let here = restored.filter(isListed)
             if let first = here.first {
                 load(select: first, viewing: isViewing ? first : nil, alsoSelect: isViewing ? [] : here)
             }
@@ -137,7 +137,7 @@ extension BrowserModel {
             }
         }
         var groups: [(String, [MoveDestination])] = []
-        let here = unique(folders.prefix(30).map(\.url))
+        let here = unique(allFolders.prefix(30).map(\.url)) // also when subfolders are flattened
         if !here.isEmpty { groups.append(("Folders Here", here)) }
         if canGoUp, let folder {
             groups.append(("Enclosing Folder", unique([folder.deletingLastPathComponent()])))
@@ -201,9 +201,8 @@ extension BrowserModel {
             }
         }
 
-        let here = folder?.path
-        let leaving = Set(done.filter { $0.from.deletingLastPathComponent().path == here }.map(\.from))
-        let arriving = done.filter { $0.to.deletingLastPathComponent().path == here }.map(\.to)
+        let leaving = Set(done.filter { isListed($0.from) }.map(\.from))
+        let arriving = done.filter { isListed($0.to) }.map(\.to)
         removeFromList(leaving)
         if let first = arriving.first {
             if isViewing {

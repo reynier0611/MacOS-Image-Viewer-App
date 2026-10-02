@@ -5,6 +5,10 @@ struct DuplicatesView: View {
     @Environment(BrowserModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var includeSimilar = true
+    /// Remembered between uses; off by default because a big folder tree can take a while.
+    @AppStorage("duplicatesIncludeSubfolders") private var includeSubfolders = false
+    @State private var scannedCount: Int?
+    @State private var locations: [URL: String] = [:]
     @State private var sensitivity: SimilaritySensitivity = .normal
     @State private var groups: [DuplicateGroup] = []
     @State private var keepers: [UUID: URL] = [:]
@@ -31,25 +35,30 @@ struct DuplicatesView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Find Duplicates")
                     .font(.title3.bold())
-                Text("\(model.allImages.count) items in “\(model.folderDisplayName)”. Everything is analyzed on this Mac.")
+                Text("\(scannedCount.map(String.init) ?? "…") items in “\(model.folderDisplayName)”\(includeSubfolders ? " and its subfolders" : ""). Everything is analyzed on this Mac.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
-            Spacer()
-            Toggle("Include similar images", isOn: $includeSimilar)
-            Picker("Sensitivity", selection: $sensitivity) {
-                ForEach(SimilaritySensitivity.allCases) { Text($0.rawValue).tag($0) }
+            HStack(spacing: 18) {
+                Toggle("Include subfolders", isOn: $includeSubfolders)
+                    .onChange(of: includeSubfolders) { scan() }
+                Toggle("Include similar images", isOn: $includeSimilar)
+                Picker("Sensitivity", selection: $sensitivity) {
+                    ForEach(SimilaritySensitivity.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .fixedSize()
+                .disabled(!includeSimilar)
+                .help(sensitivity.explanation)
+                Spacer()
+                Button("Scan Again") { scan() }
+                    .disabled(isScanning)
             }
-            .labelsHidden()
-            .frame(width: 100)
-            .disabled(!includeSimilar)
-            .help(sensitivity.explanation)
-            Button("Scan Again") { scan() }
-                .disabled(isScanning)
         }
         .padding(16)
     }
@@ -125,10 +134,19 @@ struct DuplicatesView: View {
                 .font(.caption)
                 .lineLimit(1)
                 .truncationMode(.middle)
+            if let location = locations[item.url] {
+                Label(location, systemImage: "folder")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .help(item.url.deletingLastPathComponent().path)
+            }
             Text(details[item.url] ?? "")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
             if isKeeper {
                 Label("Best copy", systemImage: "star.fill")
                     .font(.caption2.bold())
@@ -175,14 +193,30 @@ struct DuplicatesView: View {
     }
 
     private func scan() {
+        guard let root = model.folder else { return }
         scanTask?.cancel()
         isScanning = true
         progress = 0
         status = "Starting…"
-        let items = model.allImages
         let includeSimilar = includeSimilar
         let sensitivity = sensitivity
+        let includeSubfolders = includeSubfolders
+        let showHidden = model.showHidden
+        let currentItems = model.allImages
         scanTask = Task {
+            let items: [FileItem]
+            if includeSubfolders {
+                status = "Finding photos in subfolders…"
+                items = await Task.detached(priority: .userInitiated) {
+                    DuplicateFinder.collectItems(in: root, includeSubfolders: true, includeHidden: showHidden) { count in
+                        Task { @MainActor in status = "Finding photos in subfolders… \(count) so far" }
+                    }
+                }.value
+            } else {
+                items = currentItems
+            }
+            guard !Task.isCancelled else { return }
+            scannedCount = items.count
             let found = await DuplicateFinder.findGroups(in: items, includeSimilar: includeSimilar, sensitivity: sensitivity) { value, message in
                 Task { @MainActor in
                     progress = value
@@ -194,6 +228,13 @@ struct DuplicatesView: View {
             groups = found
             self.keepers = keepers
             self.details = details
+            // Where each copy lives, relative to this folder (copies often share a name).
+            var locations: [URL: String] = [:]
+            for item in found.flatMap(\.items) {
+                let parent = item.url.deletingLastPathComponent().path
+                locations[item.url] = parent == root.path ? "This folder" : String(parent.dropFirst(root.path.count + 1))
+            }
+            self.locations = locations
             // Pre-mark only exact extra copies; similar photos may be different shots.
             marked = Set(found.filter { $0.kind == .identical }.flatMap { group in
                 group.items.map(\.url).filter { $0 != keepers[group.id] }
@@ -214,8 +255,7 @@ struct DuplicatesView: View {
                     parts.append("\(Int(size.width))×\(Int(size.height))")
                 }
                 parts.append(ByteCountFormatter.string(fromByteCount: item.size, countStyle: .file))
-                parts.append(item.modified.formatted(date: .abbreviated, time: .omitted))
-                details[item.url] = parts.joined(separator: " · ")
+                details[item.url] = parts.joined(separator: " · ") + "\n" + item.modified.formatted(date: .abbreviated, time: .omitted)
             }
         }
         return (keepers, details)

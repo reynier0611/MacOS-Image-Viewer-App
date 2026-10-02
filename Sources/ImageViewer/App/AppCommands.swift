@@ -67,6 +67,8 @@ struct AppCommands: Commands {
                 ForEach(SortKey.allCases) { Text($0.rawValue).tag($0) }
             }
             Toggle("Sort Ascending", isOn: $model.sortAscending)
+            Toggle("Show All Subfolders", isOn: $model.showsAllSubfolders)
+                .keyboardShortcut("s", modifiers: [.command, .option])
             Toggle("Show Hidden Files", isOn: $model.showHidden)
                 .keyboardShortcut(".", modifiers: [.command, .shift])
             Divider()

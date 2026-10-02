@@ -25,8 +25,19 @@ struct BrowserView: View {
                 } actions: {
                     Button("Clear Search and Filters") { model.clearFilters() }
                 }
+            } else if model.gridItems.isEmpty && model.isLoadingFolder, let found = model.scanFoundCount {
+                VStack(spacing: 10) {
+                    ProgressView()
+                    Text("Finding photos and videos in all subfolders…")
+                    Text("\(found) found so far")
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             } else if model.gridItems.isEmpty && !model.isLoadingFolder {
-                ContentUnavailableView("No Images", systemImage: "photo", description: Text("This folder has no images or subfolders."))
+                ContentUnavailableView(
+                    "No Images", systemImage: "photo",
+                    description: Text(model.showsAllSubfolders ? "There are no images or videos in this folder or its subfolders." : "This folder has no images or subfolders.")
+                )
             } else {
                 ThumbnailGrid()
             }

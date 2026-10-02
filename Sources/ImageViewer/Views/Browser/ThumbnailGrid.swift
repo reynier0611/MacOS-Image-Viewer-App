@@ -86,7 +86,10 @@ struct ThumbnailGrid: View {
 
     @ViewBuilder
     private func cell(for item: FileItem, size: CGFloat, layout: Int) -> some View {
-        let base = GridCell(item: item, size: size, isSelected: model.selectedURLs.contains(item.url), rating: model.rating(for: item))
+        let base = GridCell(
+            item: item, size: size, isSelected: model.selectedURLs.contains(item.url),
+            rating: model.rating(for: item), location: subfolder(of: item)
+        )
             .background(GeometryReader { geometry in
                 Color.clear.preference(
                     key: CellFramesKey.self,
@@ -110,6 +113,13 @@ struct ThumbnailGrid: View {
                 DragPreview(item: item, count: model.selectedURLs.contains(item.url) ? max(1, model.selectedImages.count) : 1)
             }
         }
+    }
+
+    /// The item's folder relative to the open folder, when showing all subfolders.
+    private func subfolder(of item: FileItem) -> String? {
+        guard model.showsAllSubfolders, let root = model.folder?.path else { return nil }
+        let parent = item.url.deletingLastPathComponent().path
+        return parent == root ? "" : String(parent.dropFirst(root.count + 1))
     }
 
     private var marqueeGesture: some Gesture {

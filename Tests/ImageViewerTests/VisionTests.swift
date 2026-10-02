@@ -33,6 +33,30 @@ struct VisionTests {
         #expect(Set(groups.first?.items.map(\.name) ?? []) == ["a.jpg", "a copy.jpg"])
     }
 
+    @Test func scansSubfoldersOnlyWhenAskedAndSkipsHiddenFoldersAndPackages() async throws {
+        let folder = TempFolder()
+        func dir(_ path: String) -> URL {
+            let url = folder.url.appendingPathComponent(path, isDirectory: true)
+            try! FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            return url
+        }
+        let original = Fixtures.write(Fixtures.leftRedRightBlue(), to: folder.file("top.jpg"))
+        try FileManager.default.copyItem(at: original, to: dir("2024/Trip/Day 1").appendingPathComponent("copy.jpg"))
+        try FileManager.default.copyItem(at: original, to: dir(".hidden").appendingPathComponent("secret.jpg"))
+        try FileManager.default.copyItem(at: original, to: dir("Old.photoslibrary/originals").appendingPathComponent("inside.jpg"))
+        Fixtures.write(Fixtures.solid(CGColor(gray: 0.3, alpha: 1)), to: dir("2024").appendingPathComponent("other.jpg"))
+
+        let topOnly = DuplicateFinder.collectItems(in: folder.url, includeSubfolders: false)
+        #expect(topOnly.map(\.name) == ["top.jpg"])
+
+        let everything = DuplicateFinder.collectItems(in: folder.url, includeSubfolders: true)
+        #expect(Set(everything.map(\.name)) == ["top.jpg", "copy.jpg", "other.jpg"]) // not hidden, not inside the package
+
+        let groups = await DuplicateFinder.findGroups(in: everything, includeSimilar: false, sensitivity: .normal) { _, _ in }
+        #expect(groups.count == 1)
+        #expect(Set(groups.first?.items.map(\.name) ?? []) == ["top.jpg", "copy.jpg"])
+    }
+
     static let sonoma = Fixtures.wallpapers.appendingPathComponent("Sonoma.heic")
     static let other = Fixtures.wallpapers.appendingPathComponent("iMac Blue.heic")
 
