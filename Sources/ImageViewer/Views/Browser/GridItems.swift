@@ -107,7 +107,9 @@ struct ThumbnailView: View {
                                 .padding(max(3, size * 0.03))
                         }
                     }
-                    .shadow(color: .black.opacity(0.25), radius: 1.5, y: 1)
+                    // A hairline edge rather than a drop shadow: crisper, and a shadow per thumbnail
+                    // is one of the costlier things to draw while scrolling.
+                    .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(.black.opacity(0.15), lineWidth: 0.5))
                     .opacity(rating == Ratings.rejected ? 0.4 : 1) // rejects fade back, like Lightroom
                     .overlay(alignment: .bottom) {
                         RatingBadge(rating: rating)

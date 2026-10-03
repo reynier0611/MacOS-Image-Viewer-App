@@ -33,52 +33,61 @@ struct ThumbnailGrid: View {
             let columns = max(1, Int((geometry.size.width - padding * 2 + spacing) / (cellWidth + spacing)))
             // Changes whenever cell positions could change, so stale remembered frames get replaced.
             let layout = Hasher.hash(columns, size, model.listingVersion)
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVGrid(
-                        columns: Array(repeating: GridItem(.fixed(cellWidth), spacing: spacing), count: columns),
-                        spacing: 22
-                    ) {
-                        ForEach(model.gridItems) { item in
-                            cell(for: item, size: size, layout: layout)
-                        }
-                    }
-                    .padding(padding)
-                    .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
-                    // Empty space: click to deselect, drag to draw a selection rectangle.
-                    .background {
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                let flags = NSEvent.modifierFlags
-                                if !flags.contains(.command) && !flags.contains(.shift) { model.clearSelection() }
+            // ZStack: GridBackground sits behind the ScrollView. The ScrollView's own AppKit
+            // background is cleared (drawsBackground = false) so the canvas shows through.
+            ZStack {
+                GridBackground()
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVGrid(
+                            columns: Array(repeating: GridItem(.fixed(cellWidth), spacing: spacing), count: columns),
+                            spacing: 22
+                        ) {
+                            ForEach(model.gridItems) { item in
+                                cell(for: item, size: size, layout: layout)
                             }
-                            .gesture(marqueeGesture)
-                    }
-                    .background(ScrollViewFinder { autoScroller.scrollView = $0 })
-                    .overlay(alignment: .topLeading) { marqueeView }
-                    .coordinateSpace(name: Self.space)
-                    .onPreferenceChange(CellFramesKey.self) { reported in
-                        if reported.layout != cellFramesLayout {
-                            cellFramesLayout = reported.layout
-                            cellFrames = reported.frames
-                        } else {
-                            cellFrames.merge(reported.frames) { $1 }
                         }
-                        if marqueeStart != nil { updateMarqueeSelection() }
+                        .padding(padding)
+                        .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
+                        // Empty space: click to deselect, drag to draw a selection rectangle.
+                        .background {
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    let flags = NSEvent.modifierFlags
+                                    if !flags.contains(.command) && !flags.contains(.shift) { model.clearSelection() }
+                                }
+                                .gesture(marqueeGesture)
+                        }
+                        .background(ScrollViewFinder { sv in
+                            autoScroller.scrollView = sv
+                            // Let the GridBackground behind the scroll view show through.
+                            sv.drawsBackground = false
+                        })
+                        .overlay(alignment: .topLeading) { marqueeView }
+                        .coordinateSpace(name: Self.space)
+                        .onPreferenceChange(CellFramesKey.self) { reported in
+                            if reported.layout != cellFramesLayout {
+                                cellFramesLayout = reported.layout
+                                cellFrames = reported.frames
+                            } else {
+                                cellFrames.merge(reported.frames) { $1 }
+                            }
+                            if marqueeStart != nil { updateMarqueeSelection() }
+                        }
                     }
-                }
-                // While images are being dragged over the grid, scroll near the edges so
-                // off-screen folders can be reached. Folder tiles handle the actual drop.
-                .onDrop(of: [.imageViewerSelection], delegate: AutoScrollDropDelegate(scroller: autoScroller))
-                .onChange(of: columns, initial: true) { model.gridColumns = columns }
-                .onChange(of: model.selection) { _, selection in
-                    guard let selection, !model.isViewing, marquee == nil else { return }
-                    proxy.scrollTo(selection)
-                }
-                .onChange(of: model.isViewing) { _, isViewing in
-                    guard !isViewing, let selection = model.selection else { return }
-                    proxy.scrollTo(selection, anchor: .center)
+                    // While images are being dragged over the grid, scroll near the edges so
+                    // off-screen folders can be reached. Folder tiles handle the actual drop.
+                    .onDrop(of: [.imageViewerSelection], delegate: AutoScrollDropDelegate(scroller: autoScroller))
+                    .onChange(of: columns, initial: true) { model.gridColumns = columns }
+                    .onChange(of: model.selection) { _, selection in
+                        guard let selection, !model.isViewing, marquee == nil else { return }
+                        proxy.scrollTo(selection)
+                    }
+                    .onChange(of: model.isViewing) { _, isViewing in
+                        guard !isViewing, let selection = model.selection else { return }
+                        proxy.scrollTo(selection, anchor: .center)
+                    }
                 }
             }
         }
@@ -162,6 +171,63 @@ struct ThumbnailGrid: View {
                 .offset(x: marquee.minX, y: marquee.minY)
                 .allowsHitTesting(false)
         }
+    }
+}
+
+/// Soft macOS-wallpaper-style gradient behind the thumbnail grid.
+/// Three radial color blobs (indigo, teal, mauve) pool in the corners and fade toward the centre
+/// where thumbnails sit. Re-rendered only on window resize; no per-frame cost.
+private struct GridBackground: View {
+    var body: some View {
+        Canvas { ctx, size in
+            let bounds = Path(CGRect(origin: .zero, size: size))
+            let r = max(size.width, size.height)
+
+            // Indigo/blue wash — upper-right, largest blob, sets the dominant hue.
+            ctx.fill(bounds, with: .radialGradient(
+                Gradient(colors: [
+                    Color(red: 0.32, green: 0.40, blue: 0.90).opacity(0.18),
+                    .clear
+                ]),
+                center: CGPoint(x: size.width * 0.85, y: size.height * 0.08),
+                startRadius: 0,
+                endRadius: r * 0.72
+            ))
+
+            // Teal/cyan — lower-right corner, slightly smaller.
+            ctx.fill(bounds, with: .radialGradient(
+                Gradient(colors: [
+                    Color(red: 0.05, green: 0.62, blue: 0.72).opacity(0.14),
+                    .clear
+                ]),
+                center: CGPoint(x: size.width * 0.96, y: size.height * 0.92),
+                startRadius: 0,
+                endRadius: r * 0.58
+            ))
+
+            // Violet/mauve — lower-left, the quietest accent.
+            ctx.fill(bounds, with: .radialGradient(
+                Gradient(colors: [
+                    Color(red: 0.55, green: 0.25, blue: 0.75).opacity(0.09),
+                    .clear
+                ]),
+                center: CGPoint(x: size.width * 0.04, y: size.height * 0.96),
+                startRadius: 0,
+                endRadius: r * 0.50
+            ))
+
+            // Warm rose — upper-left, very faint counter-balance.
+            ctx.fill(bounds, with: .radialGradient(
+                Gradient(colors: [
+                    Color(red: 0.85, green: 0.38, blue: 0.52).opacity(0.06),
+                    .clear
+                ]),
+                center: CGPoint(x: size.width * 0.02, y: size.height * 0.05),
+                startRadius: 0,
+                endRadius: r * 0.42
+            ))
+        }
+        .allowsHitTesting(false)
     }
 }
 
