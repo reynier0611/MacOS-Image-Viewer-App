@@ -11,6 +11,18 @@ struct Coordinate: Hashable, Sendable {
     var location: CLLocationCoordinate2D { .init(latitude: latitude, longitude: longitude) }
 }
 
+/// Camera and lens details from EXIF. Only populated for photos that carry this data (JPEG, HEIC…).
+struct CameraInfo: Equatable, Sendable {
+    var make: String?
+    var model: String?
+    var lens: String?
+    var shutterSpeed: Double?   // seconds, e.g. 0.004 → "1/250 s"
+    var fNumber: Double?        // e.g. 2.8 → "f/2.8"
+    var iso: Int?
+    var focalLength: Double?    // mm
+    var exposureBias: Double?   // EV stops; absent or 0 = neutral
+}
+
 /// Facts read from a file's metadata once per folder load: when it was taken and where.
 struct MediaInfo: Sendable {
     var captureDate: Date?
@@ -19,6 +31,8 @@ struct MediaInfo: Sendable {
     var rating: Int?
     /// Tags and note stored in the file (see `Annotations`).
     var annotations = Annotations()
+    /// Camera, lens and exposure settings. nil for screenshots, exports and videos.
+    var camera: CameraInfo?
 }
 
 enum MediaIndex {
@@ -50,6 +64,18 @@ enum MediaIndex {
             if (gps[kCGImagePropertyGPSLongitudeRef] as? String) == "W" { longitude = -longitude }
             info.coordinate = Coordinate(latitude: latitude, longitude: longitude)
         }
+        // Camera info — reuse the already-fetched dictionaries, no extra I/O.
+        var cam = CameraInfo()
+        cam.make  = tiff[kCGImagePropertyTIFFMake]  as? String
+        cam.model = tiff[kCGImagePropertyTIFFModel] as? String
+        cam.lens  = exif[kCGImagePropertyExifLensModel] as? String
+        cam.shutterSpeed = (exif[kCGImagePropertyExifExposureTime] as? NSNumber)?.doubleValue
+        cam.fNumber      = (exif[kCGImagePropertyExifFNumber]      as? NSNumber)?.doubleValue
+        cam.focalLength  = (exif[kCGImagePropertyExifFocalLength]  as? NSNumber)?.doubleValue
+        cam.exposureBias = (exif[kCGImagePropertyExifExposureBiasValue] as? NSNumber)?.doubleValue
+        if let isos = exif[kCGImagePropertyExifISOSpeedRatings] as? [Int] { cam.iso = isos.first }
+        // Only store if at least one meaningful field is present.
+        if cam.make != nil || cam.model != nil || cam.shutterSpeed != nil { info.camera = cam }
         return info
     }
 

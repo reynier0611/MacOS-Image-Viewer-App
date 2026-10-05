@@ -19,6 +19,7 @@ struct InspectorView: View {
                             Label("\(model.selectedURLs.count) items selected", systemImage: "checkmark.circle")
                                 .font(.headline)
                         }
+                        cameraSection(for: item)
                         annotationSections(for: item)
                         if !item.isDirectory && !item.isVideo {
                             section("Histogram") {
@@ -204,6 +205,49 @@ struct InspectorView: View {
     private func initialMapPosition(for points: [MapPoint]) -> MapCameraPosition {
         guard points.count == 1, let point = points.first else { return .automatic }
         return .camera(MapCamera(centerCoordinate: point.coordinate.location, distance: 150_000))
+    }
+
+    // MARK: Camera info
+
+    /// Compact "shot on" card shown at the very top of the inspector for photos that carry EXIF.
+    @ViewBuilder
+    private func cameraSection(for item: FileItem) -> some View {
+        if !item.isDirectory, !item.isVideo, let cam = model.mediaInfo[item.url]?.camera {
+            let bodyName = [cam.make, cam.model].compactMap { $0 }.joined(separator: " ")
+            let rows: [MetadataRow] = [
+                cam.shutterSpeed.map { MetadataRow(label: "Shutter",      value: formatShutter($0)) },
+                cam.fNumber.map      { MetadataRow(label: "Aperture",     value: String(format: "f/%.4g", $0)) },
+                cam.iso.map          { MetadataRow(label: "ISO",          value: "\($0)") },
+                cam.focalLength.map  { MetadataRow(label: "Focal length", value: String(format: "%.4g mm", $0)) },
+                cam.exposureBias.flatMap { $0 != 0
+                    ? MetadataRow(label: "Exp. bias", value: String(format: "%+.1f EV", $0))
+                    : nil },
+            ].compactMap { $0 }
+
+            section("Camera") {
+                if !bodyName.isEmpty {
+                    Label(bodyName, systemImage: "camera")
+                        .font(.callout)
+                }
+                if let lens = cam.lens {
+                    Label(lens, systemImage: "camera.aperture")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                if !rows.isEmpty {
+                    rowsGrid(rows)
+                        .font(.callout)
+                        .padding(.top, bodyName.isEmpty && cam.lens == nil ? 0 : 4)
+                }
+            }
+        }
+    }
+
+    private func formatShutter(_ seconds: Double) -> String {
+        guard seconds > 0 else { return "—" }
+        if seconds >= 1 { return String(format: "%.1f s", seconds) }
+        let denom = Int((1 / seconds).rounded())
+        return "1/\(denom) s"
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {

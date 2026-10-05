@@ -142,49 +142,14 @@ struct ImageMetadata {
         }
         if !image.isEmpty { metadata.sections.append(.init(title: "Image", rows: image)) }
 
-        // Camera
-        var camera: [MetadataRow] = []
-        let make = (tiff[kCGImagePropertyTIFFMake] as? String)?.trimmingCharacters(in: .whitespaces)
-        let model = (tiff[kCGImagePropertyTIFFModel] as? String)?.trimmingCharacters(in: .whitespaces)
-        if let model {
-            let full = if let make, !model.lowercased().hasPrefix(make.lowercased()) { "\(make) \(model)" } else { model }
-            camera.append(.init(label: "Camera", value: full))
-        } else if let make {
-            camera.append(.init(label: "Camera", value: make))
-        }
-        if let lens = (exif[kCGImagePropertyExifLensModel] as? String) ?? (exifAux[kCGImagePropertyExifAuxLensModel] as? String) {
-            camera.append(.init(label: "Lens", value: lens))
-        }
-        if let focal = number(exif[kCGImagePropertyExifFocalLength]) {
-            var value = String(format: "%g mm", (focal * 10).rounded() / 10)
-            if let equiv = number(exif[kCGImagePropertyExifFocalLenIn35mmFilm]), equiv > 0 {
-                value += " (\(Int(equiv)) mm equiv.)"
-            }
-            camera.append(.init(label: "Focal Length", value: value))
-        }
-        if let fNumber = number(exif[kCGImagePropertyExifFNumber]) {
-            camera.append(.init(label: "Aperture", value: String(format: "ƒ/%g", (fNumber * 10).rounded() / 10)))
-        }
-        if let exposure = number(exif[kCGImagePropertyExifExposureTime]), exposure > 0 {
-            let value = exposure < 1 ? "1/\(Int((1 / exposure).rounded())) s" : String(format: "%g s", exposure)
-            camera.append(.init(label: "Shutter", value: value))
-        }
-        if let iso = (exif[kCGImagePropertyExifISOSpeedRatings] as? [NSNumber])?.first {
-            camera.append(.init(label: "ISO", value: "\(iso.intValue)"))
-        }
-        if let bias = number(exif[kCGImagePropertyExifExposureBiasValue]), bias != 0 {
-            camera.append(.init(label: "Exposure Bias", value: String(format: "%+.1f EV", bias)))
-        }
-        if let flash = number(exif[kCGImagePropertyExifFlash]) {
-            camera.append(.init(label: "Flash", value: Int(flash) & 1 == 1 ? "Fired" : "Did not fire"))
-        }
+        // Date Taken — splice into the General section (index 0) before "Where", using the exif
+        // dict already in hand. Camera body/lens/exposure are shown in the top Camera card instead.
         if let taken = exif[kCGImagePropertyExifDateTimeOriginal] as? String {
-            camera.append(.init(label: "Date Taken", value: formatExifDate(taken)))
+            var rows = metadata.sections[0].rows
+            // Insert before the last row ("Where").
+            rows.insert(.init(label: "Date Taken", value: formatExifDate(taken)), at: rows.count - 1)
+            metadata.sections[0] = MetadataSection(title: "General", rows: rows)
         }
-        if let software = tiff[kCGImagePropertyTIFFSoftware] as? String {
-            camera.append(.init(label: "Software", value: software))
-        }
-        if !camera.isEmpty { metadata.sections.append(.init(title: "Camera", rows: camera)) }
 
         // Location
         if var latitude = number(gps[kCGImagePropertyGPSLatitude]),
