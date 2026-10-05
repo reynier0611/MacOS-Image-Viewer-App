@@ -8,6 +8,8 @@ struct InspectorView: View {
     @State private var histogram: Histogram?
     @State private var labels: [String]?
     @State private var showAllProperties = false
+    @State private var isEditingDate = false
+    @State private var editedDate = Date()
 
     // The histogram and map live here, so they only appear while the (i) inspector is open.
     var body: some View {
@@ -20,6 +22,7 @@ struct InspectorView: View {
                                 .font(.headline)
                         }
                         cameraSection(for: item)
+                        dateTakenSection(for: item)
                         annotationSections(for: item)
                         if !item.isDirectory && !item.isVideo {
                             section("Histogram") {
@@ -239,6 +242,58 @@ struct InspectorView: View {
                         .font(.callout)
                         .padding(.top, bodyName.isEmpty && cam.lens == nil ? 0 : 4)
                 }
+            }
+        }
+    }
+
+    // MARK: Date Taken
+
+    @ViewBuilder
+    private func dateTakenSection(for item: FileItem) -> some View {
+        if !item.isDirectory, !item.isVideo, ImageDateEditor.canEdit(item.url) {
+            let current = model.mediaInfo[item.url]?.captureDate
+            section("Date Taken") {
+                if isEditingDate {
+                    VStack(alignment: .leading, spacing: 8) {
+                        DatePicker("", selection: $editedDate, displayedComponents: [.date, .hourAndMinute])
+                            .labelsHidden()
+                            .datePickerStyle(.compact)
+                        HStack {
+                            Button("Cancel") { isEditingDate = false }
+                                .buttonStyle(.borderless)
+                            Spacer()
+                            Button("Save") {
+                                model.setCaptureDate(editedDate, for: item)
+                                isEditingDate = false
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                        }
+                    }
+                } else {
+                    HStack {
+                        if let date = current {
+                            Text(date.formatted(date: .abbreviated, time: .standard))
+                                .font(.callout)
+                        } else {
+                            Text("No date stored")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button {
+                            editedDate = current ?? Date()
+                            isEditingDate = true
+                        } label: {
+                            Image(systemName: "pencil")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Edit date and time")
+                    }
+                }
+            }
+            .onChange(of: item.url) {
+                isEditingDate = false
             }
         }
     }

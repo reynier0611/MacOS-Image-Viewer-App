@@ -185,14 +185,8 @@ struct MainToolbar: ToolbarContent {
 
         ToolbarItemGroup(placement: .primaryAction) {
             if model.isViewing {
-                ControlGroup {
-                    Button { model.step(-1) } label: { Label("Previous", systemImage: "chevron.backward") }
-                        .disabled((model.viewerIndex ?? 0) == 0)
-                        .help("Previous image (←)")
-                    Button { model.step(1) } label: { Label("Next", systemImage: "chevron.forward") }
-                        .disabled((model.viewerIndex ?? 0) >= model.images.count - 1)
-                        .help("Next image (→)")
-                }
+                // Previous/Next are handled by the edge-overlay buttons on the image itself (and
+                // by the keyboard arrow keys), so no toolbar pair is needed here.
                 ControlGroup {
                     Button { model.zoom(.zoomOut) } label: { Label("Zoom Out", systemImage: "minus.magnifyingglass") }
                         .help("Zoom out (⌘-)")
