@@ -12,6 +12,7 @@ struct ThumbnailGrid: View {
     @State private var marqueeEnd: CGPoint = .zero
     @State private var marqueeBase: Set<URL> = []
     @State private var autoScroller = AutoScroller()
+    @State private var scrollMonitor: Any?
 
     private var marquee: CGRect? {
         guard let start = marqueeStart else { return nil }
@@ -38,6 +39,7 @@ struct ThumbnailGrid: View {
             ZStack {
                 GridBackground()
                 ScrollViewReader { proxy in
+
                     ScrollView {
                         LazyVGrid(
                             columns: Array(repeating: GridItem(.fixed(cellWidth), spacing: spacing), count: columns),
@@ -91,6 +93,32 @@ struct ThumbnailGrid: View {
                 }
             }
         }
+        .onAppear { startScrollMonitor() }
+        .onDisappear { stopScrollMonitor() }
+    }
+
+    // Trackpad pinch-to-resize thumbnails. Scroll wheel is handled by the app-level monitor
+    // in ContentView so it is always active regardless of which view is on screen.
+    private func startScrollMonitor() {
+        let m = model
+        var pinchBaseSize: CGFloat = 100
+        var pinchAccum: CGFloat = 1.0
+
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .magnify) { event in
+            guard !m.isViewing else { return event }
+            if event.phase.contains(.began) {
+                pinchBaseSize = m.thumbnailSize
+                pinchAccum = 1.0
+            }
+            pinchAccum *= (1 + event.magnification)
+            DispatchQueue.main.async { m.thumbnailSize = min(400, max(80, pinchBaseSize * pinchAccum)) }
+            return nil
+        }
+    }
+
+    private func stopScrollMonitor() {
+        if let monitor = scrollMonitor { NSEvent.removeMonitor(monitor) }
+        scrollMonitor = nil
     }
 
     @ViewBuilder

@@ -69,6 +69,7 @@ struct ContentView: View {
         .onAppear {
             model.undoManager = undoManager
             model.start()
+            setupScrollMonitor(model: model)
         }
         .onChange(of: undoManager) { model.undoManager = undoManager }
     }
@@ -122,6 +123,31 @@ struct ContentView: View {
             .padding(.bottom, model.isViewing && model.showFilmstrip ? 124 : 60)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
+    }
+}
+
+/// Registers a single app-lifetime local event monitor for scroll wheel events.
+/// Called once from ContentView.onAppear — never removed, so it is always active.
+private func setupScrollMonitor(model: BrowserModel) {
+    NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+        // Use whichever delta property is non-zero — mice use deltaY, trackpads use
+        // scrollingDeltaY, and some Bluetooth mice with smooth scrolling use both.
+        let dy = event.scrollingDeltaY != 0 ? event.scrollingDeltaY : event.deltaY
+        guard abs(dy) > 0.1 else { return event }
+
+        if model.isViewing {
+            let action: ZoomAction = dy > 0 ? .zoomIn : .zoomOut
+            DispatchQueue.main.async { model.zoom(action) }
+            return nil
+        } else if model.browseLayout == .grid,
+                  event.modifierFlags.contains(.command) {
+            let factor: CGFloat = dy > 0 ? 1.08 : 1.0 / 1.08
+            DispatchQueue.main.async {
+                model.thumbnailSize = min(400, max(80, model.thumbnailSize * factor))
+            }
+            return nil
+        }
+        return event
     }
 }
 
@@ -235,7 +261,7 @@ struct MainToolbar: ToolbarContent {
                     Label("Thumbnail Size", systemImage: "photo")
                 }
                 .frame(width: 110)
-                .help("Thumbnail size (⌘- / ⌘=)")
+                .help("Thumbnail size (⌘- / ⌘= / ⌘+scroll)")
                 Picker("Layout", selection: $model.browseLayout) {
                     Label("Grid", systemImage: "square.grid.2x2").tag(BrowseLayout.grid)
                     Label("Map", systemImage: "map").tag(BrowseLayout.map)
